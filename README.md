@@ -1,41 +1,54 @@
-# [![](https://raw.githubusercontent.com/FFXIV-CombatReborn/RebornAssets/main/IconAssets/GBR_Icon.png)](https://github.com/FFXIV-CombatReborn/GatherBuddyReborn)
+# GatherBuddy Reborn（繁中移植版 · TC12） / Traditional-Chinese Port
 
-**GatherBuddyReborn**
+> 簡化採集與釣魚。<br>
+> Simplify gathering and fishing.
 
-![Github Latest Releases](https://img.shields.io/github/downloads/FFXIV-CombatReborn/GatherBuddyReborn/latest/total.svg?style=for-the-badge)
-![Github All Releases](https://img.shields.io/github/downloads/FFXIV-CombatReborn/GatherBuddyReborn/total.svg?style=for-the-badge)
-![Github License](https://img.shields.io/github/license/FFXIV-CombatReborn/GatherBuddyReborn.svg?label=License&style=for-the-badge)
+**繁體中文**：這是 **[GatherBuddy Reborn](https://github.com/FFXIV-CombatReborn/GatherBuddyReborn)** 的繁體中文客戶端移植版，對應 **FFXIV 7.1 / yanmucorp Dalamud API12（.NET 9）**。本專案僅做相容性移植，**非官方、非原作維護**；所有原始功能與設計著作權歸原作者 **The Combat Reborn Team**。
 
-GatherBuddyReborn is a community-made fork of the original GatherBuddy plugin for Final Fantasy XIV. This tool is designed to enhance your gameplay experience by assisting with all things gathering, now with automated routes via vnavmesh.
+**English**: A Traditional-Chinese-client port of **[GatherBuddy Reborn](https://github.com/FFXIV-CombatReborn/GatherBuddyReborn)** targeting **FFXIV 7.1 / yanmucorp Dalamud API12 (.NET 9)**. Compatibility port only — **unofficial and not maintained by the original author**. All original work © **The Combat Reborn Team**.
 
-## Features
+---
 
-- **AutoGather**: Automated pathing for gathering up to 10 full stacks (999 each) of a resource.
-- **Resource Queueing**: Create a list of resources you want and GBR will gather up to 10 stacks of each!
-- **Full BTN/MIN Automation**: GBR can find any BTN/MIN item in the world and gather it for you fully automatically, no user input required beyond initial setup
+## 這是什麼 / About
 
-**NOTE**: vnavmesh plugin is *required* for full automation. Please see the links section of this README for more information on vnavmesh.
-  
-## Installing
-- Enter `/xlsettings` in the chat window and go to the Experimental tab in the opening window.
-- **Skip below the DevPlugins section to the Custom Plugin Repositories section.**
-- Copy and paste the repo.json link into the first free text input field.
-```
-https://raw.githubusercontent.com/FFXIV-CombatReborn/CombatRebornRepo/main/pluginmaster.json
-```
-- Click on the + button and make sure the checkmark beside the new field is set afterwards.
-- **Click on the Save-icon in the bottom right.**
+用物品名稱即可查詢採集點、魚與其座標，並提供追蹤特殊出現時間與天氣條件的介面，讓採集與釣魚更輕鬆。
 
-Following these steps, you should be able to see all contained plugins in the Available Plugins tab in the Dalamud Plugin Installer.
-No Plugins will be installed, you have just made them available. You can now select which of these plugins you actually want to install.
+Look up nodes, fish and their locations by item name, with a UI for tracking special uptime windows and weather conditions.
 
-## Want to contribute?
+## 安裝 / Installation
 
-- Create a fork
-- Make your changes
-- Test the changes
-- Create a PR and point it to main
+**繁體中文**
+1. 使用 **XIVTCLauncher** 啟動繁體中文客戶端。
+2. 遊戲內輸入 `/xlsettings` → 切到 **Experimental** 分頁 → **Custom Plugin Repositories（自訂插件庫）**。
+3. 貼上下列網址並按 **+** 儲存：
+   ```
+   https://raw.githubusercontent.com/lilasrepo/DalamudPlugins/main/pluginmaster.json
+   ```
+4. 輸入 `/xlplugins`，搜尋 **GatherBuddy Reborn (TC12)** → 安裝 → 啟用。
 
-## Links
+**English**
+1. Launch the Traditional-Chinese client with **XIVTCLauncher**.
+2. In-game, type `/xlsettings` → **Experimental** tab → **Custom Plugin Repositories**.
+3. Add this URL and save with **+**:
+   ```
+   https://raw.githubusercontent.com/lilasrepo/DalamudPlugins/main/pluginmaster.json
+   ```
+4. Type `/xlplugins`, search **GatherBuddy Reborn (TC12)** → Install → Enable.
 
-[vnavmesh](https://github.com/awgil/ffxiv_navmesh) Required for automated navigation
+## 對應版本 / Compatibility
+
+| 項目 / Item | 版本 / Version |
+|---|---|
+| 遊戲 / Game | FFXIV 7.1（繁中客戶端 / TC client） |
+| Dalamud | yanmucorp API12（.NET 9） |
+| 移植自上游 / Ported from upstream | v7.2.4.0 |
+
+## 原作與授權 / Credits & License
+
+本專案 fork 自 **[FFXIV-CombatReborn/GatherBuddyReborn](https://github.com/FFXIV-CombatReborn/GatherBuddyReborn)**，授權沿用上游；所有原始功能著作權歸 **The Combat Reborn Team**。<br>
+Forked from **[FFXIV-CombatReborn/GatherBuddyReborn](https://github.com/FFXIV-CombatReborn/GatherBuddyReborn)**. License follows upstream; all original work © **The Combat Reborn Team**.
+
+## 免責聲明 / Disclaimer
+
+第三方插件，使用風險自負。**移植相關問題請回報到本 repo 的 Issues，請勿打擾上游原作者。**<br>
+Third-party plugin — use at your own risk. **For port-specific issues please open an Issue here; do not contact the upstream author.**
