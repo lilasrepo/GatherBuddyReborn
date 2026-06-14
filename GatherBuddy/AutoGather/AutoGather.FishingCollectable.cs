@@ -4,8 +4,9 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using Dalamud.Game.Text;
 using Dalamud.Utility;
-using GatherBuddy.Automation;
-using GatherBuddy.Plugin;
+using ECommons;
+using ECommons.DalamudServices;
+using ECommons.UIHelpers.AddonMasterImplementations;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using Lumina.Excel.Sheets;
 
@@ -18,102 +19,98 @@ namespace GatherBuddy.AutoGather
             "collectability of",
             "収集価値",
             "Sammlerwert",
-            "Valeur de collection",
-            "收藏价值"
+            "Valeur de collection"
         ];
 
         private unsafe bool HandleFishingCollectable()
         {
             if (!GatherBuddy.Config.AutoGatherConfig.AutoCollectablesFishing)
+            {
+                GatherBuddy.Log.Debug("[AutoCollectable] Feature disabled in config");
                 return false;
+            }
 
             var addon = SelectYesnoAddon;
-            if (addon == null || !addon->IsReady)
+            if (addon == null)
                 return false;
+            
+            if (!addon->IsReady)
+            {
+                GatherBuddy.Log.Debug("[AutoCollectable] SelectYesno addon not ready");
+                return false;
+            }
+            
+            GatherBuddy.Log.Debug("[AutoCollectable] SelectYesno addon found and ready");
 
             var master = new AddonMaster.SelectYesno(addon);
             var text = master.TextLegacy;
 
             if (!CollectablePatterns.Any(text.Contains))
+                return false;
+
+            GatherBuddy.Log.Debug($"[AutoCollectable] Detected collectable dialog with text: {text}");
+
+            var name = Enum.GetValues<SeIconChar>()
+                .Cast<SeIconChar>()
+                .Aggregate(addon->AtkValues[15].String.AsDalamudSeString().GetText(), 
+                    (current, enumValue) => current.Replace(enumValue.ToIconString(), ""))
+                .Trim();
+
+            if (GenericHelpers.FindRow<Item>(x => x.IsCollectable && !x.Singular.IsEmpty && 
+                name.Contains(x.Singular.GetText(), StringComparison.InvariantCultureIgnoreCase)) is not { RowId: > 0 } item)
             {
-                GatherBuddy.Log.Debug($"[AutoCollectable] 确认对话框提示与收藏品模式不匹配: {text}");
+                GatherBuddy.Log.Debug($"[AutoCollectable] Failed to match any collectable to {name} [original={addon->AtkValues[15].String}]");
                 return false;
             }
 
-            GatherBuddy.Log.Debug($"[AutoCollectable] 检测到收藏品对话框，文本: {text}");
-
-            if (addon->AtkValuesCount < 15)
-            {
-                GatherBuddy.Log.Debug($"[AutoCollectable] AtkValues 不足（{addon->AtkValuesCount}），无法读取物品 ID");
-                return false;
-            }
-            
-            var itemIdEncoded = addon->AtkValues[14].UInt;
-            if (itemIdEncoded < 500000)
-            {
-                GatherBuddy.Log.Debug($"[AutoCollectable] 无效的编码物品 ID: {itemIdEncoded}");
-                return false;
-            }
-            
-            var itemId = itemIdEncoded - 500000;
-            GatherBuddy.Log.Debug($"[AutoCollectable] 已提取物品 ID: {itemId}（来自编码值 {itemIdEncoded}）");
-
-            var itemSheet = Dalamud.GameData.GetExcelSheet<Item>();
-            var item = itemSheet.GetRowOrDefault(itemId);
-            
-            if (item == null || item.Value.RowId == 0)
-            {
-                GatherBuddy.Log.Debug($"[AutoCollectable] 找不到 ID 为 {itemId} 的物品");
-                return false;
-            }
-            
-            var itemValue = item.Value;
-            if (!itemValue.IsCollectable)
-            {
-                GatherBuddy.Log.Debug($"[AutoCollectable] 物品 [{itemValue.RowId}] {itemValue.Name} 不是收藏品");
-                return false;
-            }
-
-            GatherBuddy.Log.Debug($"[AutoCollectable] 检测到物品 [{itemValue.RowId}] {itemValue.Name}");
+            GatherBuddy.Log.Debug($"[AutoCollectable] Detected item [{item.RowId}] {item.Name}");
 
             if (!int.TryParse(Regex.Match(text, @"\d+").Value, out var value))
             {
-                GatherBuddy.Log.Debug($"[AutoCollectable] 无法从文本解析收藏价值");
+                GatherBuddy.Log.Debug($"[AutoCollectable] Failed to parse collectability value from text");
                 return false;
             }
 
-            GatherBuddy.Log.Debug($"[AutoCollectable] 检测到收藏价值: {value}");
-            GatherBuddy.Log.Debug($"[AutoCollectable] 物品数据 - 以太缩减: {itemValue.AetherialReduce}，附加数据.RowId: {itemValue.AdditionalData.RowId}");
+            if (GenericHelpers.FindRow<CollectablesShopItem>(x => x.Item.Value.RowId == item.RowId) is { } collectability)
             {
-                if (itemValue.AetherialReduce > 0)
+                var min = collectability.CollectablesShopRefine.Value.LowCollectability;
+                GatherBuddy.Log.Debug($"[AutoCollectable] Minimum collectability required is {min}, value detected is {value}");
+                
+                if (value >= min)
                 {
-                    GatherBuddy.Log.Debug($"[AutoCollectable] 接受 [{itemValue.RowId}] {itemValue.Name} - 以太沙鱼");
-                    Callback.Fire(&addon->AtkUnitBase, true, 0);
+                    GatherBuddy.Log.Debug($"[AutoCollectable] Accepting [{item.RowId}] {item.Name} with collectability of {value}");
+                    master.Yes();
                     return true;
-                }
-                else if (itemValue.AdditionalData.RowId != 0)
-                {
-                    var wksItem = Dalamud.GameData.GetExcelSheet<WKSItemInfo>().GetRow(itemValue.AdditionalData.RowId);
-                    if (wksItem.RowId != 0)
-                {
-                        GatherBuddy.Log.Debug($"[AutoCollectable] 接受 [{itemValue.RowId}] {itemValue.Name} - 星际鱼 {wksItem.WKSItemSubCategory.ValueNullable?.Name ?? "null"}");
-                        Callback.Fire(&addon->AtkUnitBase, true, 0);
-                        return true;
-                    }
-                    else
-                    {
-                        GatherBuddy.Log.Debug($"[AutoCollectable] 找不到 [{itemValue.RowId}] {itemValue.Name} 的收藏品商店物品");
-                    }
                 }
                 else
                 {
-                    GatherBuddy.Log.Debug($"[AutoCollectable] 找不到 [{itemValue.RowId}] {itemValue.Name} 的收藏品商店物品");
+                    GatherBuddy.Log.Debug($"[AutoCollectable] Declining [{item.RowId}] {item.Name} with insufficient collectability of {value}");
+                    master.No();
+                    return true;
+                }
+            }
+            else
+            {
+                if (item.AetherialReduce > 0)
+                {
+                    GatherBuddy.Log.Debug($"[AutoCollectable] Accepting [{item.RowId}] {item.Name} - aethersand fish");
+                    master.Yes();
+                    return true;
+                }
+                // API12 stub: WKSItemInfo.WKSItemSubCategory.ValueNullable wrapper is newer Lumina;
+                // also Cosmic Exploration "stellar fish" feature is game 7.5+. B1 stub - branch never matches on TC 7.1.
+                else if (false)
+                {
+                    master.Yes();
+                    return true;
+                }
+                else
+                {
+                    GatherBuddy.Log.Debug($"[AutoCollectable] No CollectablesShopItem found for [{item.RowId}] {item.Name}");
                 }
             }
 
-            GatherBuddy.Log.Debug($"[AutoCollectable] 接受 [{itemValue.RowId}] {itemValue.Name} - 普通收藏品鱼，价值 {value}");
-            Callback.Fire(&addon->AtkUnitBase, true, 0);
-            return true;
+            return false;
         }
     }
 }

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Text;
-using Dalamud.Bindings.ImGui;
+using ImGuiNET;
 using Dalamud.Game.ClientState.Keys;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
@@ -15,9 +15,9 @@ using GatherBuddy.Enums;
 using GatherBuddy.Gui;
 using GatherBuddy.Interfaces;
 using GatherBuddy.Time;
-using ElliLib;
+using OtterGui;
 using Functions = GatherBuddy.Plugin.Functions;
-using ImRaii = ElliLib.Raii.ImRaii;
+using ImRaii = OtterGui.Raii.ImRaii;
 
 namespace GatherBuddy.GatherHelper;
 
@@ -79,11 +79,11 @@ public class GatherWindow : Window
     {
         var sb = new StringBuilder();
         sb.Append(loc == null
-            ? "未知位置\n未知地图\n未知以太之光\n"
-            : $"{loc.Name}\n{loc.Territory.Name}\n{loc.ClosestAetheryte?.Name ?? "无以太之光"}\n");
+            ? "Unknown Location\nUnknown Territory\nUnknown Aetheryte\n"
+            : $"{loc.Name}\n{loc.Territory.Name}\n{loc.ClosestAetheryte?.Name ?? "No Aetheryte"}\n");
 
         sb.Append(time.Equals(TimeInterval.Always)
-            ? "常驻"
+            ? "Always Up"
             : $"{time.Start}\n{time.End}\n{time.DurationString()}\n{TimeInterval.DurationString(time.Start > GatherBuddy.Time.ServerTime ? time.Start : time.End, GatherBuddy.Time.ServerTime, false)}");
 
         return sb.ToString();
@@ -162,7 +162,7 @@ public class GatherWindow : Window
         if (GatherBuddy.Config.ShowGatherWindowOnlyAvailable && time.Start > GatherBuddy.Time.ServerTime)
             return;
 
-        var inventoryCount = item.GetTotalCount();
+        var inventoryCount = item.GetInventoryCount();
 
         if (quantity > 0 && inventoryCount >= quantity && GatherBuddy.Config.HideGatherWindowCompletedItems)
             return;
@@ -173,7 +173,7 @@ public class GatherWindow : Window
         {
             using var style = ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, ImGui.GetStyle().ItemSpacing / 2);
             if (Icons.DefaultStorage.TryLoadIcon(item.ItemData.Icon, out var icon))
-                ImGuiUtil.HoverIcon(icon.Handle, icon.Size, new Vector2(ImGui.GetTextLineHeight()));
+                ImGuiUtil.HoverIcon(icon.ImGuiHandle, icon.Size, new Vector2(ImGui.GetTextLineHeight()));
             else
                 ImGui.Dummy(new Vector2(ImGui.GetTextLineHeight()));
             ImGui.SameLine();
@@ -299,7 +299,8 @@ public class GatherWindow : Window
         _data.Clear();
 
         var list = _plugin.AutoGatherListsManager.ActiveItems
-            .Select(x => (x.Item, x.Quantity))
+            .Select(x => (Item: x.Item as IGatherable, x.Quantity))
+            .Union(_plugin.AutoGatherListsManager.ActiveFish.Select(x => (Item: x.Fish as IGatherable, x.Quantity)))
             .Concat(_plugin.GatherWindowManager.ActiveItems.Select(i => (Item: i, Quantity: 0u)))
             .GroupBy(x => x.Item)
             .Select(g => { var (loc, time) = GatherBuddy.UptimeManager.BestLocation(g.Key); return (g.Key, loc, time, (uint)g.Sum(x => x.Quantity)); });
@@ -368,7 +369,7 @@ public class GatherWindow : Window
     {
         var       colorId = GatherBuddy.AutoGather.Enabled ? ColorId.GatherWindowAvailable.Value() : ColorId.GatherWindowText.Value();
         using var color = ImRaii.PushColor(ImGuiCol.Text, colorId);
-        if (ImGui.Selectable($"自动采集: {GatherBuddy.AutoGather.AutoStatus}###toggle-button"))
+        if (ImGui.Selectable($"Auto-Gather: {GatherBuddy.AutoGather.AutoStatus}###toggle-button"))
         {
             GatherBuddy.AutoGather.Enabled = !GatherBuddy.AutoGather.Enabled;
         }
@@ -377,7 +378,7 @@ public class GatherWindow : Window
             _plugin.Interface.Toggle();
         }
         color.Pop();
-        ImGuiUtil.HoverTooltip("点击以启用/禁用自动采集, 右键以开关插件界面");
+        ImGuiUtil.HoverTooltip("Click to enable/disable auto-gather. Right click to toggle interface");
         using var table = ImRaii.Table("##table", GatherBuddy.Config.ShowGatherWindowTimers ? 2 : 1);
         if (!table)
             return;

@@ -1,23 +1,26 @@
-using ElliLib.Filesystem;
-using GatherBuddy.Interfaces;
-using GatherBuddy.Plugin;
-using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using FFXIVClientStructs.FFXIV.Client.Game;
+using GatherBuddy.Classes;
+using GatherBuddy.Interfaces;
+using GatherBuddy.Plugin;
+using Newtonsoft.Json;
+using OtterGui;
+using OtterGui.Filesystem;
 using Functions = GatherBuddy.Plugin.Functions;
 
 namespace GatherBuddy.AutoGather.Lists;
 
 public class ManualOrderSortMode : ISortMode<AutoGatherList>
 {
-    public ReadOnlySpan<byte> Name
-        => "手动排序"u8;
+    public string Name
+        => "Manual Order";
 
-    public ReadOnlySpan<byte> Description
-        => "按手动指定的顺序排序，文件夹优先"u8;
+    public string Description
+        => "Sort by manually assigned order, with folders first.";
 
     public IEnumerable<FileSystem<AutoGatherList>.IPath> GetChildren(FileSystem<AutoGatherList>.Folder folder)
     {
@@ -38,9 +41,9 @@ public partial class AutoGatherListsManager : IDisposable
     private const string FileNameFallback = "gather_window.json";
 
     private readonly FileSystem<AutoGatherList>             _fileSystem;
-    private readonly List<(IGatherable Item, uint Quantity)> _activeItems   = [];
-    private readonly List<(IGatherable Item, uint Quantity)> _fallbackItems = [];
-    public static ManualOrderSortMode SortMode { get; } = new();
+    private readonly List<(Gatherable Item, uint Quantity)> _activeItems   = [];
+    private readonly List<(Gatherable Item, uint Quantity)> _fallbackItems = [];
+    private readonly List<(Fish Fish, uint Quantity)>       _activeFish    = [];
 
     public FileSystem<AutoGatherList> FileSystem
         => _fileSystem;
@@ -48,11 +51,14 @@ public partial class AutoGatherListsManager : IDisposable
     public IEnumerable<AutoGatherList> Lists
         => _fileSystem.Select(kvp => kvp.Key);
 
-    public ReadOnlyCollection<(IGatherable Item, uint Quantity)> ActiveItems
+    public ReadOnlyCollection<(Gatherable Item, uint Quantity)> ActiveItems
         => _activeItems.AsReadOnly();
 
-    public ReadOnlyCollection<(IGatherable Item, uint Quantity)> FallbackItems
+    public ReadOnlyCollection<(Gatherable Item, uint Quantity)> FallbackItems
         => _fallbackItems.AsReadOnly();
+
+    public ReadOnlyCollection<(Fish Fish, uint Quantity)> ActiveFish
+        => _activeFish.AsReadOnly();
 
     public AutoGatherListsManager()
     {
@@ -60,56 +66,92 @@ public partial class AutoGatherListsManager : IDisposable
         _fileSystem.Changed += OnFileSystemChanged;
     }
 
-    private AutoGatherListsManager(AutoGatherList.Config[] configs)
+    private FileSystem<AutoGatherList>.IPath? _dropTarget = null;
+    private FileSystem<AutoGatherList>.IPath? _movedPath = null;
+
+    public void SetDropTarget(FileSystem<AutoGatherList>.IPath dropTarget, FileSystem<AutoGatherList>.IPath? movedPath)
     {
-        _fileSystem = new FileSystem<AutoGatherList>();
-        var change = false;
-
-        foreach (var cfg in configs)
-        {
-            change |= AutoGatherList.FromConfig(cfg, out var list);
-
-            var folderPath = string.IsNullOrEmpty(list.FolderPath) ? string.Empty : list.FolderPath;
-
-            if (folderPath == list.Name)
-            {
-                folderPath = string.Empty;
-                change = true;
-            }
-
-            var folderNames = folderPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-
-            var folder = _fileSystem.Root;
-            foreach (var folderName in folderNames)
-            {
-                (folder, _) = _fileSystem.FindOrCreateFolder(folder, folderName);
-            }
-
-            try
-            {
-                _fileSystem.CreateLeaf(folder, list.Name, list);
-            }
-            catch
-            {
-                _fileSystem.CreateDuplicateLeaf(folder, list.Name, list);
-                change = true;
-            }
-        }
-
-        if (change)
-            Save();
-
-        _fileSystem.Changed += OnFileSystemChanged;
-        SetActiveItems();
+        _dropTarget = dropTarget;
+        _movedPath = movedPath;
     }
 
     private void OnFileSystemChanged(FileSystemChangeType type, FileSystem<AutoGatherList>.IPath changedObject, FileSystem<AutoGatherList>.IPath? previousParent, FileSystem<AutoGatherList>.IPath? newParent)
     {
-        // Not renumbering the source folder on ObjectRemoved or ObjectMoved makes the numbering sparse, but it's fine for ordering.
-        if (type is FileSystemChangeType.ObjectMoved or FileSystemChangeType.LeafAdded && changedObject is FileSystem<AutoGatherList>.Leaf newLeaf)
+        if (type == FileSystemChangeType.ObjectMoved)
         {
-            newLeaf.Value.Order = newLeaf.Parent.GetLeaves().Where(leaf => leaf != newLeaf).Select(leaf => leaf.Value.Order).DefaultIfEmpty().Max() + 1;
+            
+            if (changedObject is FileSystem<AutoGatherList>.Leaf movedLeaf && _dropTarget != null && changedObject == _movedPath)
+            {
+                ReorderAfterDrop(movedLeaf, _dropTarget);
+                _dropTarget = null;
+                _movedPath = null;
+            }
+            else
+            {
+                ReorderListsInFolder(newParent as FileSystem<AutoGatherList>.Folder ?? _fileSystem.Root);
+            }
+            
+            if (previousParent != newParent && previousParent is FileSystem<AutoGatherList>.Folder oldFolder)
+            {
+                ReorderListsInFolder(oldFolder);
+            }
             Save();
+        }
+        else if (type == FileSystemChangeType.LeafAdded)
+        {
+            if (changedObject is FileSystem<AutoGatherList>.Leaf leaf)
+            {
+                var parent = leaf.Parent;
+                var siblings = parent.GetLeaves().Where(l => l != leaf).ToList();
+                
+                if (siblings.Count > 0 && siblings.Any(l => l.Value.Order == leaf.Value.Order))
+                {
+                    var maxOrder = siblings.Select(l => l.Value.Order).Max();
+                    leaf.Value.Order = maxOrder + 1;
+                }
+            }
+        }
+    }
+
+    private void ReorderAfterDrop(FileSystem<AutoGatherList>.Leaf movedLeaf, FileSystem<AutoGatherList>.IPath dropTarget)
+    {
+        var targetFolder = dropTarget as FileSystem<AutoGatherList>.Folder ?? dropTarget.Parent;
+        
+        if (dropTarget is FileSystem<AutoGatherList>.Leaf targetLeaf && targetLeaf != movedLeaf)
+        {
+            var leaves = targetFolder.GetLeaves().Where(l => l != movedLeaf).OrderBy(l => l.Value.Order).ToList();
+            var targetIndex = leaves.IndexOf(targetLeaf);
+            
+            for (int i = 0; i < leaves.Count; i++)
+            {
+                if (i < targetIndex)
+                {
+                    leaves[i].Value.Order = i;
+                }
+                else if (i == targetIndex)
+                {
+                    leaves[i].Value.Order = i + 1;
+                }
+                else
+                {
+                    leaves[i].Value.Order = i + 1;
+                }
+            }
+            
+            movedLeaf.Value.Order = targetIndex;
+        }
+        else
+        {
+            ReorderListsInFolder(targetFolder);
+        }
+    }
+
+    private void ReorderListsInFolder(FileSystem<AutoGatherList>.Folder folder)
+    {
+        var leaves = folder.GetLeaves().OrderBy(l => l.Value.Order).ToList();
+        for (int i = 0; i < leaves.Count; i++)
+        {
+            leaves[i].Value.Order = i;
         }
     }
 
@@ -118,14 +160,10 @@ public partial class AutoGatherListsManager : IDisposable
 
     public void SetActiveItems()
     {
-        if (RemoveCompletedItemsFromEnabledLists())
-            Save();
         _activeItems.Clear();
+        _activeFish.Clear();
         _fallbackItems.Clear();
-
-        var items = _fileSystem.Root.GetAllDescendants(SortMode)
-            .OfType<FileSystem<AutoGatherList>.Leaf>()
-            .Select(leaf => leaf.Value)
+        var items = _fileSystem.Select(kvp => kvp.Key)
             .Where(l => l.Enabled)
             .SelectMany(l => l.Items.Select(i => (Item: i, Quantity: l.Quantities[i], l.Fallback, ItemEnabled: l.EnabledItems[i])))
             .Where(i => i.ItemEnabled)
@@ -134,13 +172,21 @@ public partial class AutoGatherListsManager : IDisposable
 
         foreach (var (item, quantity, fallback) in items)
         {
-            if (fallback)
+            if (item is Fish fish)
             {
-                _fallbackItems.Add((item, quantity));
+                _activeFish.Add((fish, quantity));
             }
-            else
+
+            if (item is Gatherable gatherable)
             {
-                _activeItems.Add((item, quantity));
+                if (fallback)
+                {
+                    _fallbackItems.Add((gatherable, quantity));
+                }
+                else
+                {
+                    _activeItems.Add((gatherable, quantity));
+                }
             }
         }
 
@@ -152,7 +198,7 @@ public partial class AutoGatherListsManager : IDisposable
         var file = Functions.ObtainSaveFile(FileName);
         if (file == null)
         {
-            GatherBuddy.Log.Error("无法获取自动采集列表的保存文件");
+            GatherBuddy.Log.Error("Failed to obtain save file for auto-gather lists");
             return;
         }
 
@@ -176,28 +222,67 @@ public partial class AutoGatherListsManager : IDisposable
 
     public static AutoGatherListsManager Load()
     {
-        var file = Functions.ObtainSaveFile(FileName);
+        var ret    = new AutoGatherListsManager();
+        var file   = Functions.ObtainSaveFile(FileName);
+        var change = false;
         if (file is not { Exists: true })
         {
             file = Functions.ObtainSaveFile(FileNameFallback);
+            if (file is not { Exists: true })
+            {
+                ret.Save();
+                return ret;
+            }
+
+            change = true;
         }
 
-        if (file is { Exists: true })
+        try
         {
-            try
+            var text = File.ReadAllText(file.FullName);
+            var data = JsonConvert.DeserializeObject<AutoGatherList.Config[]>(text)!;
+            foreach (var cfg in data)
             {
-                var text = File.ReadAllText(file.FullName);
-                var configs = JsonConvert.DeserializeObject<AutoGatherList.Config[]>(text);
-                if (configs != null)
-                    return new AutoGatherListsManager(configs);
+                change |= AutoGatherList.FromConfig(cfg, out var list);
+                
+                var folderPath = string.IsNullOrEmpty(list.FolderPath) ? string.Empty : list.FolderPath;
+                
+                if (folderPath == list.Name)
+                {
+                    folderPath = string.Empty;
+                    change = true;
+                }
+                
+                var folderNames = folderPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                
+                var folder = ret._fileSystem.Root;
+                foreach (var folderName in folderNames)
+                {
+                    (folder, _) = ret._fileSystem.FindOrCreateFolder(folder, folderName);
+                }
+                
+                try
+                {
+                    ret._fileSystem.CreateLeaf(folder, list.Name, list);
+                }
+                catch
+                {
+                    ret._fileSystem.CreateDuplicateLeaf(folder, list.Name, list);
+                    change = true;
+                }
             }
-            catch (Exception e)
-            {
-                GatherBuddy.Log.Error($"Error deserializing auto gather lists:\n{e}");
-                Communicator.PrintError($"[GatherBuddy Reborn] �Զ��ɼ��б�����ʧ��, ��ִ�����á�");
-            }
+
+            if (change)
+                ret.Save();
+        }
+        catch (Exception e)
+        {
+            GatherBuddy.Log.Error($"Error deserializing auto gather lists:\n{e}");
+            Communicator.PrintError($"[GatherBuddy Reborn] Auto gather lists failed to load and have been reset.");
+            ret.Save();
         }
 
-        return new AutoGatherListsManager();
+        ret.SetActiveItems();
+        return ret;
     }
 }

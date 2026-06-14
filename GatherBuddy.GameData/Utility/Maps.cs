@@ -16,7 +16,8 @@ public static class Maps
 
     public static unsafe void SetFlagMarker(AgentMap* instance, IMarkable location, uint iconId = 60561U)
     {
-        instance->FlagMarkerCount = 0;
+        // API12 stub: AgentMap.FlagMarkerCount is game-7.5 ClientStructs only.
+        // SetFlagMapMarker still works on TC client's older AgentMap.
         var x = IntegerToInternal(location.IntegralXCoord, location.Territory.SizeFactor) - location.Territory.Data.Map.ValueNullable?.OffsetX ?? 0;
         var y = IntegerToInternal(location.IntegralYCoord, location.Territory.SizeFactor) - location.Territory.Data.Map.ValueNullable?.OffsetY ?? 0;
         instance->SetFlagMapMarker(location.Territory.Id, location.Territory.Data.Map.RowId, x, y, iconId);

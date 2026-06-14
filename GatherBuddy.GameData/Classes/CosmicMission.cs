@@ -14,6 +14,8 @@ public class CosmicMission
     public CosmicMission(WKSMissionUnit data)
     {
         Data = data;
-        Name = MultiString.ParseSeStringLumina(Data.Name);
+        // API12 stub: WKSMissionUnit.Name is a game-7.5 Cosmic Exploration sheet column
+        // not present in TC client's Lumina. Empty name; missions still indexed by RowId.
+        Name = string.Empty;
     }
 }

@@ -1,7 +1,6 @@
-using FFXIVClientStructs.FFXIV.Client.Game;
-using GatherBuddy.AutoGather.Helpers;
-using GatherBuddy.Plugin;
 using System;
+using FFXIVClientStructs.FFXIV.Client.Game;
+using GatherBuddy.Plugin;
 
 namespace GatherBuddy.SeFunctions;
 
@@ -17,9 +16,9 @@ public sealed class EnhancedCurrentWeather
 
         var territoryType = Dalamud.ClientState.TerritoryType;
         
-        if (territoryType != 0 && weatherManager->HasIndividualWeather((ushort)territoryType))
+        if (territoryType != 0 && weatherManager->HasIndividualWeather(territoryType))
         {
-            var individualWeather = weatherManager->GetIndividualWeather((ushort)territoryType);
+            var individualWeather = weatherManager->GetIndividualWeather(territoryType);
             return individualWeather;
         }
         
@@ -34,17 +33,17 @@ public sealed class EnhancedCurrentWeather
             return 0;
 
         var territoryType = Dalamud.ClientState.TerritoryType;
-        var isInDiadem = Diadem.IsInside;
+        var isInDiadem = Functions.InTheDiadem();
         
         var currentWeather = weatherManager->GetCurrentWeather();
         
         if (territoryType != 0)
         {
-            var hasIndividual = weatherManager->HasIndividualWeather((ushort)territoryType);
+            var hasIndividual = weatherManager->HasIndividualWeather(territoryType);
             
             if (hasIndividual)
             {
-                var individualWeather = weatherManager->GetIndividualWeather((ushort)territoryType);
+                var individualWeather = weatherManager->GetIndividualWeather(territoryType);
                 
                 if (isInDiadem)
                 {

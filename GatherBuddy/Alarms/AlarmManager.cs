@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -9,7 +9,7 @@ using GatherBuddy.Classes;
 using GatherBuddy.Interfaces;
 using GatherBuddy.Time;
 using Newtonsoft.Json;
-using ElliLib.Extensions;
+using OtterGui.Extensions;
 using Functions = GatherBuddy.Plugin.Functions;
 
 namespace GatherBuddy.Alarms;
@@ -64,13 +64,13 @@ public partial class AlarmManager : IDisposable
     }
 
     private static void TriggerWeatherAlarm()
-        => UIGlobals.PlayChatSoundEffect((uint)GatherBuddy.Config.WeatherAlarm.ToIdx());
+        => UIGlobals.PlaySoundEffect((uint)GatherBuddy.Config.WeatherAlarm);
 
     private static void TriggerHourAlarm()
-        => UIGlobals.PlayChatSoundEffect((uint)GatherBuddy.Config.HourAlarm.ToIdx());
+        => UIGlobals.PlaySoundEffect((uint)GatherBuddy.Config.HourAlarm);
 
     public static void PreviewAlarm(Sounds id)
-        => UIGlobals.PlayChatSoundEffect((uint)id.ToIdx());
+        => UIGlobals.PlaySoundEffect((uint)id);
 
 
     public void AddActiveAlarm(Alarm alarm, bool trigger = true)
@@ -198,7 +198,7 @@ public partial class AlarmManager : IDisposable
         };
     }
 
-    public unsafe void OnUpdate(IFramework _)
+    public void OnUpdate(IFramework _)
     {
         var st = GatherBuddy.Time.ServerTime;
         if (LastFishAlarm != null && LastFishAlarm.Value.Item3.End < st)
@@ -212,7 +212,7 @@ public partial class AlarmManager : IDisposable
         if (Functions.BetweenAreas())
             return;
 
-        if (GatherBuddy.Config.AlarmsOnlyWhenLoggedIn && !Dalamud.ClientState.IsLoggedIn)
+        if (GatherBuddy.Config.AlarmsOnlyWhenLoggedIn && Dalamud.ClientState.LocalPlayer == null)
             return;
 
         if (!GatherBuddy.Config.AlarmsInDuty && Functions.BoundByDuty())
@@ -232,7 +232,7 @@ public partial class AlarmManager : IDisposable
             LastItemAlarm = (alarm, location, uptime);
 
         if (alarm.SoundId > Sounds.Unknown)
-            UIGlobals.PlayChatSoundEffect((uint)alarm.SoundId.ToIdx());
+            UIGlobals.PlaySoundEffect((uint)alarm.SoundId);
 
         // Some lax rounding for display.
         var newUptime = uptime;

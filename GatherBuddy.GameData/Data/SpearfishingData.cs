@@ -1,3 +1,5 @@
+using System.Linq;
+
 namespace GatherBuddy.Data;
 
 public static class SpearfishingData

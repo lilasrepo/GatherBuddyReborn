@@ -14,7 +14,7 @@ public static unsafe class Teleporter
             return false;
         }
 
-        if (!Dalamud.PlayerState.IsLoaded)
+        if (Dalamud.ClientState.LocalPlayer == null)
             return true;
         teleport->UpdateAetheryteList();
 
@@ -36,9 +36,9 @@ public static unsafe class Teleporter
             return true;
         }
 
-        Communicator.PrintError("无法传送到至 ",
-            GatherBuddy.GameData.Aetherytes.TryGetValue(aetheryte, out var a) ? a.Name : "未知以太之光", GatherBuddy.Config.SeColorNames,
-            " 未共鸣。");
+        Communicator.PrintError("Could not teleport to ",
+            GatherBuddy.GameData.Aetherytes.TryGetValue(aetheryte, out var a) ? a.Name : "Unknown Aetheryte", GatherBuddy.Config.SeColorNames,
+            " not attuned.");
         return false;
     }
 

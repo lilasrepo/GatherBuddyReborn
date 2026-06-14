@@ -1,14 +1,12 @@
-using GatherBuddy.Helpers;
+using ECommons.GameHelpers;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using GatherBuddy.AutoGather.Extensions;
 using GatherBuddy.AutoGather.AtkReaders;
-using GatherBuddy.AutoGather.Collectables;
 using GatherBuddy.Classes;
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
-using Dalamud.Game.ClientState.Objects.SubKinds;
+using ECommons.DalamudServices;
 
 namespace GatherBuddy.AutoGather
 {
@@ -16,31 +14,12 @@ namespace GatherBuddy.AutoGather
     {
         private CollectableRotation? CurrentCollectableRotation;
 
-        private unsafe bool HasCollectables()
-        {
-            if (!GatherBuddy.Config.CollectableConfig.AutoTurnInCollectables
-             || !CollectableTurnInRequirements.IsAvailable)
-                return false;
-
-            if (GatherBuddy.CollectableManager == null)
-                return false;
-            var thresholdState = CollectableInventoryHelper.GetThresholdState(GatherBuddy.Config.CollectableConfig);
-            if (!thresholdState.ThresholdReached)
-                return false;
-            if (thresholdState.InventoryFullMode)
-                GatherBuddy.Log.Debug($"[HasCollectables] Inventory threshold reached ({thresholdState.UsedSlots}/{thresholdState.TotalSlots}) with {thresholdState.CollectableCount} collectables - triggering turn-in");
-            else
-                GatherBuddy.Log.Debug($"[HasCollectables] Collectable threshold reached ({thresholdState.CollectableCount}) - triggering turn-in");
-
-            return true;
-        }
-
         private unsafe partial class CollectableRotation
         {
             public CollectableRotation(ConfigPreset config, Gatherable item, uint quantity)
             {
                 this.config = config;
-                shouldUseFullRotation = Player.Object?.CurrentGp >= config.CollectableActionsMinGP;
+                shouldUseFullRotation = Player.Object.CurrentGp >= config.CollectableActionsMinGP;
                 this.item = item;
                 this.quantity = quantity;
             }
@@ -55,8 +34,7 @@ namespace GatherBuddy.AutoGather
 
             public Actions.BaseAction GetNextAction(GatheringMasterpieceReader masterpieceReader)
             {
-                var player = Player.Object ?? throw new InvalidOperationException("Player object is null");
-                var itemsLeft = (int)(quantity - item.GetTotalCount());
+                var itemsLeft = (int)(quantity - item.GetInventoryCount());
 
                 if (itemsLeft <= 0 && GatherBuddy.Config.AutoGatherConfig.AbandonNodes)
                     throw new NoGatherableItemsInNodeException();
@@ -77,7 +55,7 @@ namespace GatherBuddy.AutoGather
                 if (collectability >= targetScore)
                 {
                     if ((shouldUseFullRotation || config.CollectableAlwaysUseSolidAge)
-                     && ShouldSolidAgeCollectables(player, currentIntegrity, maxIntegrity, itemsLeft))
+                     && ShouldSolidAgeCollectables(currentIntegrity, maxIntegrity, itemsLeft))
                         return Actions.SolidAge;
                     else
                         return Actions.Collect;
@@ -87,29 +65,29 @@ namespace GatherBuddy.AutoGather
                  && collectability >= minScore)
                     return Actions.Collect;
 
-                if (shouldUseFullRotation && NeedScrutiny(player, collectability, scourColl, meticulousColl, brazenColl, targetScore) && ShouldUseScrutiny(player))
+                if (shouldUseFullRotation && NeedScrutiny(collectability, scourColl, meticulousColl, brazenColl, targetScore) && ShouldUseScrutiny())
                     return Actions.Scrutiny;
 
                 if (meticulousColl + collectability >= targetScore
-                 && ShouldUseMeticulous(player))
+                 && ShouldUseMeticulous())
                     return Actions.Meticulous;
 
-                if (Player.Status.Any(s => s.StatusId == 3911 /*Collector's High Standard*/) && ShouldUseBrazen(player))
+                if (Player.Status.Any(s => s.StatusId == 3911 /*Collector's High Standard*/) && ShouldUseBrazen())
                     return Actions.Brazen;
 
                 if (scourColl + collectability >= targetScore
-                 && ShouldUseScour(player))
+                 && ShouldUseScour())
                     return Actions.Scour;
 
-                if (ShouldUseMeticulous(player))
+                if (ShouldUseMeticulous())
                     return Actions.Meticulous;
 
                 //Fallback path if some actions are disabled.
-                if (Player.Status.Any(s => s.StatusId == 2418 /*Collector's Standard*/) && ShouldUseBrazen(player))
+                if (Player.Status.Any(s => s.StatusId == 2418 /*Collector's Standard*/) && ShouldUseBrazen())
                     return Actions.Brazen;
-                if (ShouldUseScour(player))
+                if (ShouldUseScour())
                     return Actions.Scour;
-                if (ShouldUseBrazen(player))
+                if (ShouldUseBrazen())
                     return Actions.Brazen;
 
                 throw new NoCollectableActionsException();
@@ -138,99 +116,99 @@ namespace GatherBuddy.AutoGather
                 if (item.GatheringData.Unknown3 is 3 or 4 or 6)
                     minScore = targetScore;
 
-                GatherBuddy.Log.Verbose($"对 {item.Name} 使用目标收藏价值 {targetScore} 和最低收藏价值 {minScore}");
+                Svc.Log.Verbose($"Using target collectability {targetScore} and minimum collectability {minScore} for {item.Name}.");
                 return (targetScore, minScore);
             }
 
-            private bool NeedScrutiny(IPlayerCharacter player, int collectability, int scourColl, int meticulousColl, int brazenColl, int targetScore)
+            private bool NeedScrutiny(int collectability, int scourColl, int meticulousColl, int brazenColl, int targetScore)
             {
-                if (scourColl + collectability >= targetScore && ShouldUseScour(player))
+                if (scourColl + collectability >= targetScore && ShouldUseScour())
                     return false;
-                if (meticulousColl + collectability >= targetScore && ShouldUseMeticulous(player))
+                if (meticulousColl + collectability >= targetScore && ShouldUseMeticulous())
                     return false;
-                if (brazenColl + collectability >= targetScore && ShouldUseBrazen(player))
+                if (brazenColl + collectability >= targetScore && ShouldUseBrazen())
                     return false;
 
                 return true;
             }
-            private bool ShouldUseMeticulous(IPlayerCharacter player)
+            private bool ShouldUseMeticulous()
             {
-                if (player.Level < Actions.Meticulous.MinLevel)
+                if (Player.Level < Actions.Meticulous.MinLevel)
                     return false;
-                if (player.CurrentGp < Actions.Meticulous.GpCost)
+                if (Player.Object.CurrentGp < Actions.Meticulous.GpCost)
                     return false;
                 if (config.ChooseBestActionsAutomatically)
                     return true;
-                if (player.CurrentGp < config.CollectableActions.Meticulous.MinGP
-                 || player.CurrentGp > config.CollectableActions.Meticulous.MaxGP)
+                if (Player.Object.CurrentGp < config.CollectableActions.Meticulous.MinGP
+                 || Player.Object.CurrentGp > config.CollectableActions.Meticulous.MaxGP)
                     return false;
 
                 return config.CollectableActions.Meticulous.Enabled;
             }
 
-            private bool ShouldUseScour(IPlayerCharacter player)
+            private bool ShouldUseScour()
             {
-                if (player.Level < Actions.Brazen.MinLevel)
+                if (Player.Level < Actions.Brazen.MinLevel)
                     return false;
-                if (player.CurrentGp < Actions.Brazen.GpCost)
+                if (Player.Object.CurrentGp < Actions.Brazen.GpCost)
                     return false;
                 if (config.ChooseBestActionsAutomatically)
                     return true;
-                if (player.CurrentGp < config.CollectableActions.Scour.MinGP
-                 || player.CurrentGp > config.CollectableActions.Scour.MaxGP)
+                if (Player.Object.CurrentGp < config.CollectableActions.Scour.MinGP
+                 || Player.Object.CurrentGp > config.CollectableActions.Scour.MaxGP)
                     return false;
 
                 return config.CollectableActions.Scour.Enabled;
             }
 
-            private bool ShouldUseBrazen(IPlayerCharacter player)
+            private bool ShouldUseBrazen()
             {
-                if (player.Level < Actions.Meticulous.MinLevel)
+                if (Player.Level < Actions.Meticulous.MinLevel)
                     return false;
-                if (player.CurrentGp < Actions.Meticulous.GpCost)
+                if (Player.Object.CurrentGp < Actions.Meticulous.GpCost)
                     return false;
                 if (config.ChooseBestActionsAutomatically)
                     return true;
-                if (player.CurrentGp < config.CollectableActions.Brazen.MinGP
-                 || player.CurrentGp > config.CollectableActions.Brazen.MaxGP)
+                if (Player.Object.CurrentGp < config.CollectableActions.Brazen.MinGP
+                 || Player.Object.CurrentGp > config.CollectableActions.Brazen.MaxGP)
                     return false;
 
                 return config.CollectableActions.Brazen.Enabled;
             }
 
-            private bool ShouldUseScrutiny(IPlayerCharacter player)
+            private bool ShouldUseScrutiny()
             {
-                if (player.Level < Actions.Scrutiny.MinLevel)
+                if (Player.Level < Actions.Scrutiny.MinLevel)
                     return false;
-                if (player.CurrentGp < Actions.Scrutiny.GpCost)
+                if (Player.Object.CurrentGp < Actions.Scrutiny.GpCost)
                     return false;
                 if (Player.Status.Any(s => s.StatusId == Actions.Scrutiny.EffectId))
                     return false;
                 if (config.ChooseBestActionsAutomatically)
                     return true;
-                if (player.CurrentGp < config.CollectableActions.Scrutiny.MinGP
-                 || player.CurrentGp > config.CollectableActions.Scrutiny.MaxGP)
+                if (Player.Object.CurrentGp < config.CollectableActions.Scrutiny.MinGP
+                 || Player.Object.CurrentGp > config.CollectableActions.Scrutiny.MaxGP)
                     return false;
 
                 return config.CollectableActions.Scrutiny.Enabled;
             }
 
-            private bool ShouldSolidAgeCollectables(IPlayerCharacter player, int integrity, int maxIntegrity, int itemsLeft)
+            private bool ShouldSolidAgeCollectables(int integrity, int maxIntegrity, int itemsLeft)
             {
                 if (integrity > Math.Min(2, maxIntegrity - 1))
                     return false;
                 if (itemsLeft <= integrity)
                     return false;
-                if (player.Level < Actions.SolidAge.MinLevel)
+                if (Player.Level < Actions.SolidAge.MinLevel)
                     return false;
-                if (player.CurrentGp < Actions.SolidAge.GpCost)
+                if (Player.Object.CurrentGp < Actions.SolidAge.GpCost)
                     return false;
                 if (Player.Status.Any(s => s.StatusId == Actions.SolidAge.EffectId))
                     return false;
                 if (config.ChooseBestActionsAutomatically)
                     return true;
-                if (player.CurrentGp < config.CollectableActions.SolidAge.MinGP
-                 || player.CurrentGp > config.CollectableActions.SolidAge.MaxGP)
+                if (Player.Object.CurrentGp < config.CollectableActions.SolidAge.MinGP
+                 || Player.Object.CurrentGp > config.CollectableActions.SolidAge.MaxGP)
                     return false;
 
                 return config.CollectableActions.SolidAge.Enabled;

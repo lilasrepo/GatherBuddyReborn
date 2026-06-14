@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game;
@@ -33,14 +33,14 @@ public partial class FishingParser : IDisposable
     {
         _hookHook?.Enable();
         _catchHook?.Enable();
-        Dalamud.Chat.ChatMessage += OnMessageDelegate;
+        Dalamud.Chat.CheckMessageHandled += OnMessageDelegate;
     }
 
     public void Disable()
     {
         _catchHook?.Disable();
         _hookHook?.Disable();
-        Dalamud.Chat.ChatMessage -= OnMessageDelegate;
+        Dalamud.Chat.CheckMessageHandled -= OnMessageDelegate;
     }
 
     public void Dispose()
@@ -66,7 +66,7 @@ public partial class FishingParser : IDisposable
 
         if (!GatherBuddy.GameData.Fishes.TryGetValue(fishId, out var fish))
         {
-            GatherBuddy.Log.Error($"捕获了未知鱼类 ID {fishId}");
+            GatherBuddy.Log.Error($"Unknown fish id {fishId} caught.");
             return;
         }
 

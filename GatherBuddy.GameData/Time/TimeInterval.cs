@@ -1,3 +1,4 @@
+using System;
 using System.Globalization;
 
 namespace GatherBuddy.Time;
@@ -112,14 +113,14 @@ public readonly struct TimeInterval : IEquatable<TimeInterval>
         return tmp.Time switch
         {
             > RealTime.MillisecondsPerDay => shortString
-                ? $">{tmp.TotalDays}"
-                : $"{((float)tmp.Time / RealTime.MillisecondsPerDay).ToString("F2", CultureInfo.InvariantCulture)}",
+                ? $">{tmp.TotalDays}d"
+                : $"{((float)tmp.Time / RealTime.MillisecondsPerDay).ToString("F2", CultureInfo.InvariantCulture)} Days",
             > RealTime.MillisecondsPerHour => shortString
-                ? $">{tmp.TotalHours}"
-                : $"{tmp.TotalHours:D2}:{tmp.CurrentMinute:D2}",
+                ? $">{tmp.TotalHours}h"
+                : $"{tmp.TotalHours:D2}:{tmp.CurrentMinute:D2} Hours",
             _ => shortString
-                ? $"{tmp.TotalMinutes}:{tmp.CurrentSecond:D2}"
-                : $"{tmp.TotalMinutes:D2}:{tmp.CurrentSecond:D2}",
+                ? $"{tmp.TotalMinutes}:{tmp.CurrentSecond:D2}m"
+                : $"{tmp.TotalMinutes:D2}:{tmp.CurrentSecond:D2} Minutes",
         };
     }
 
@@ -128,19 +129,19 @@ public readonly struct TimeInterval : IEquatable<TimeInterval>
     {
         if (this == Always)
         {
-            timeString = "总是";
+            timeString = "Always";
             return true;
         }
 
         if (this == Never)
         {
-            timeString = "从不";
+            timeString = "Never";
             return false;
         }
 
         if (this == Invalid)
         {
-            timeString = "无效";
+            timeString = "Unknown";
             return false;
         }
 
@@ -148,7 +149,7 @@ public readonly struct TimeInterval : IEquatable<TimeInterval>
         {
             if (End < now)
             {
-                timeString = "从不";
+                timeString = "Never";
                 return false;
             }
 

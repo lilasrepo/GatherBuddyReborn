@@ -1,13 +1,13 @@
 using System;
 using System.Linq;
 using System.Numerics;
-using Dalamud.Bindings.ImGui;
+using ImGuiNET;
 using Dalamud.Interface.Utility;
 using GatherBuddy.Config;
 using GatherBuddy.Time;
-using ElliLib;
-using ElliLib.Table;
-using ImRaii = ElliLib.Raii.ImRaii;
+using OtterGui;
+using OtterGui.Table;
+using ImRaii = OtterGui.Raii.ImRaii;
 using Dalamud.Interface.Textures;
 
 namespace GatherBuddy.Gui;
@@ -45,7 +45,7 @@ public partial class Interface
         private sealed class ZoneHeader : ColumnString<CachedWeather>
         {
             public ZoneHeader()
-                => Label = "筛选区域...";
+                => Label = "Filter Zone...";
 
             public override float Width
                 => _zoneSize * ImGuiHelpers.GlobalScale;
@@ -144,7 +144,7 @@ public partial class Interface
         {
             var cursor = ImGui.GetCursorPos();
             if (icon.TryGetWrap(out var wrap, out _))
-                ImGui.Image(wrap.Handle, WeatherIconSize);
+                ImGui.Image(wrap.ImGuiHandle, WeatherIconSize);
             else
                 ImGui.Dummy(WeatherIconSize);
             ImGui.SetCursorPos(cursor + new Vector2(WeatherIconSize.X + ItemSpacing.X / 2, _textHeightIconOffset));
@@ -155,7 +155,7 @@ public partial class Interface
         {
             ImGui.SetCursorPosX(ImGui.GetCursorPosX() + offset);
             if (icon.TryGetWrap(out var wrap, out _))
-                ImGui.Image(wrap.Handle, WeatherIconSize);
+                ImGui.Image(wrap.ImGuiHandle, WeatherIconSize);
             else
                 ImGui.Dummy(WeatherIconSize);
             ImGuiUtil.HoverTooltip($"{weather.Name} ({weather.Id})");
@@ -167,9 +167,9 @@ public partial class Interface
     private void DrawWeatherTab()
     {
         using var id  = ImRaii.PushId("Weather");
-        using var tab = ImRaii.TabItem("天气");
-        ImGuiUtil.HoverTooltip("是的, \"妖雾\"确实是一种天气。\n"
-          + "在这里你可以查看所有区域未来几天的天气预报, 以及上一轮的天气。");
+        using var tab = ImRaii.TabItem("Weather");
+        ImGuiUtil.HoverTooltip("Yes, 'Gloom' is weather.\n"
+          + "See the weather forecast in all zones for the following days, as well as the last one.");
 
         if (!tab)
             return;

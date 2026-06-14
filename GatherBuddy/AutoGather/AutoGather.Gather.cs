@@ -1,19 +1,19 @@
-using Dalamud.Game.ClientState.Conditions;
-using Dalamud.Game.ClientState.Objects.Types;
-using Dalamud.Game.Text.SeStringHandling;
-using FFXIVClientStructs.FFXIV.Client.Game.Control;
-using GatherBuddy.AutoGather.AtkReaders;
-using GatherBuddy.AutoGather.Extensions;
-using GatherBuddy.AutoGather.Helpers;
-using GatherBuddy.AutoGather.Lists;
-using GatherBuddy.Classes;
-using GatherBuddy.Helpers;
-using GatherBuddy.Plugin;
-using GatherBuddy.Utilities;
 using System;
 using System.Collections.Generic;
+using Dalamud.Game.ClientState.Objects.Types;
+using FFXIVClientStructs.FFXIV.Client.Game.Control;
+using FFXIVClientStructs.FFXIV.Component.GUI;
+using GatherBuddy.Classes;
 using System.Linq;
-using System.Numerics;
+using System.Runtime.InteropServices;
+using ECommons.Automation.UIInput;
+using Dalamud.Game.ClientState.Conditions;
+using GatherBuddy.AutoGather.AtkReaders;
+using GatherBuddy.AutoGather.Extensions;
+using GatherBuddy.AutoGather.Lists;
+using GatherBuddy.Data;
+using GatherBuddy.Plugin;
+using ECommons.GameHelpers;
 
 namespace GatherBuddy.AutoGather
 {
@@ -22,59 +22,40 @@ namespace GatherBuddy.AutoGather
         private unsafe void EnqueueNodeInteraction(IGameObject gameObject, Gatherable targetItem)
         {
             var targetSystem = TargetSystem.Instance();
-            Dalamud.ToastGui.ErrorToast -= HandleNodeInteractionErrorToast;
-            Dalamud.ToastGui.ErrorToast += HandleNodeInteractionErrorToast;
-
             if (targetSystem == null)
                 return;
 
-            // Delay interaction by one frame after stopping movement to avoid the "Unable to execute command while in flight" error.
             TaskManager.Enqueue(() =>
             {
                 _lastNodeInteractionTime = Environment.TickCount64;
                 targetSystem->OpenObjectInteraction((FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)gameObject.Address);
-                GatherBuddy.Log.Debug($"与采集点交互中，" +
-                    $"水平距离: {Vector2.Distance(gameObject.Position.ToVector2(), Player.Position.ToVector2())}，" +
-                    $"垂直距离: {Player.Position.Y - gameObject.Position.Y}，" +
-                    $"条件: {string.Join(' ', Dalamud.Conditions.AsReadOnlySet())}");
             });
-
-            // If flying, it takes up to 600 ms for the Mounted condition to fade and up to 500 ms more for the Gathering condition to appear.
-
-            TaskManager.Enqueue(() =>
-            {
-                if (Dalamud.Conditions[ConditionFlag.Gathering])
+            TaskManager.Enqueue(() => Dalamud.Conditions[ConditionFlag.Gathering], 500);
+            
+            TaskManager.Enqueue(() => {
+                if (!Dalamud.Conditions[ConditionFlag.Gathering])
                 {
-                    GatherBuddy.Log.Debug($"打开采集点耗时 {Environment.TickCount64 - _lastNodeInteractionTime} 毫秒");
-                    return true;
+                    targetSystem->OpenObjectInteraction((FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)gameObject.Address);
                 }
-                return false;
-            }, 1100, "采集点交互");
-
-            TaskManager.Enqueue(() =>
-            {
-                Dalamud.ToastGui.ErrorToast -= HandleNodeInteractionErrorToast;
+            });
+            TaskManager.Enqueue(() => Dalamud.Conditions[ConditionFlag.Gathering], 500);
+            
+            TaskManager.Enqueue(() => {
                 if (!Dalamud.Conditions[ConditionFlag.Gathering] && Dalamud.Conditions[ConditionFlag.Mounted] && Dalamud.Conditions[ConditionFlag.InFlight] && !Dalamud.Conditions[ConditionFlag.Diving])
                 {
-                    ForceLandAndDismount();
+                    try
+                    {
+                        var floor = VNavmesh.Query.Mesh.PointOnFloor(Player.Position, false, 3);
+                        Navigate(floor, true);
+                        TaskManager.Enqueue(() => !IsPathGenerating);
+                        TaskManager.DelayNext(50);
+                        TaskManager.Enqueue(() => !IsPathing, 1000);
+                        EnqueueDismount();
+                    }
+                    catch { }
+                    TaskManager.Enqueue(() => { if (Dalamud.Conditions[ConditionFlag.Mounted]) _advancedUnstuck.Force(); });
                 }
             });
-        }
-
-        private unsafe void HandleNodeInteractionErrorToast(ref SeString message, ref bool isHandled)
-        {
-            // With current navigation, getting 'Unable to execute command while in flight' means we are either too high above the ground
-            // or even not above traversable ground, so retrying node interaction is pointless, force dismount instead.
-            // In the rare cases of 'Unable to execute command while jumping' we are already dismounted, so just Abort() to retry.
-
-            Dalamud.ToastGui.ErrorToast -= HandleNodeInteractionErrorToast;
-            var text = message.TextValue;
-            GatherBuddy.Log.Debug($"检测到采集点交互错误提示: {text}");
-            TaskManager.Abort();
-            if (Dalamud.Conditions[ConditionFlag.InFlight])
-                ForceLandAndDismount();
-            else
-                TaskManager.DelayNext(400);
         }
 
         private unsafe void EnqueueSpearfishingNodeInteraction(IGameObject gameObject, Classes.Fish targetFish)
@@ -158,10 +139,8 @@ namespace GatherBuddy.AutoGather
         /// </summary>
         /// <returns>UseSkills: True if the selected item is in the gathering list; false if we gather a collectable or some unneeded junk
         /// Slot: ItemSlot of item to gather</returns>
-        private (bool UseSkills, ItemSlot Slot) GetItemSlotToGather(GatherTarget gatherTarget)
+        private (bool UseSkills, ItemSlot Slot) GetItemSlotToGather(IEnumerable<GatherTarget> gatherTarget)
         {
-            System.Diagnostics.Debug.Assert(gatherTarget == default || gatherTarget.Gatherable != null && gatherTarget.Node != null);
-
             if (GatheringWindowReader == null)
                 throw new InvalidOperationException("GatheringWindowReader is null");
             var available = GatheringWindowReader.ItemSlots
@@ -174,9 +153,7 @@ namespace GatherBuddy.AutoGather
                 return (false, available.First(i => i.Item.IsTreasureMap));
             }
 
-            var target = gatherTarget != default
-                ? available.FirstOrDefault(a => gatherTarget.Gatherable?.ItemId == a.Item.ItemId)
-                : null;
+            var target = available.FirstOrDefault(a => gatherTarget.Any(i => i.Gatherable?.ItemId == a.Item.ItemId));
 
             //Gather crystals when using The Giving Land
             if (HasGivingLandBuff && (target == null || !target.Item.IsCrystal))
@@ -186,7 +163,7 @@ namespace GatherBuddy.AutoGather
                     return (true, crystal);
             }
 
-            if (target != null && target.Item.GetTotalCount() < gatherTarget.Quantity)
+            if (target != null && target.Item.GetInventoryCount() < gatherTarget.First(t => t.Gatherable?.ItemId == target.Item.ItemId).Quantity)
             {
                 //The target item is found in the node, would not overcap and we need to gather more of it
                 return (!target.IsCollectable, target);
@@ -195,16 +172,17 @@ namespace GatherBuddy.AutoGather
             //Items in the gathering list
             var gatherList = ItemsToGather
                 //Join node slots, retaining list order
-                .Join(available, i => i.Item, s => s.Item, (i, s) => s);
+                .Join(available, i => i.Item, s => s.Item, (i, s) => (Slot: s, i.Quantity))
+                //And we need more of them
+                .Where(x => x.Slot.Item.GetInventoryCount() < x.Quantity)
+                .Select(x => x.Slot);
 
             //Items in the fallback list
             var fallbackList = _plugin.AutoGatherListsManager.FallbackItems
                 //Join node slots, retaining list order
                 .Join(available, i => i.Item, s => s.Item, (i, s) => (Slot: s, i.Quantity))
-                //Check for overcap
-                .Where(x => CheckItemOvercap(x.Slot))
                 //And we need more of them
-                .Where(x => x.Slot.Item.GetTotalCount() < x.Quantity)
+                .Where(x => x.Slot.Item.GetInventoryCount() < x.Quantity)
                 .Select(x => x.Slot);
 
             var fallbackSkills = GatherBuddy.Config.AutoGatherConfig.UseSkillsForFallbackItems;
@@ -223,19 +201,23 @@ namespace GatherBuddy.AutoGather
                 return (fallbackSkills && !slot.IsCollectable, slot);
             }
 
-            if (Diadem.IsInside && gatherTarget != default && gatherTarget.Gatherable != null)
+            if (Functions.InTheDiadem() && gatherTarget.Any())
             {
-                var targetLevel = gatherTarget.Gatherable.Level;
+                var targetLevels = gatherTarget
+                    .Where(gt => gt.Gatherable != null)
+                    .Select(gt => gt.Gatherable!.Level)
+                    .Distinct()
+                    .ToHashSet();
 
                 slot = available
-                    .Where(s => s.Item != null && s.Item.Level == targetLevel)
+                    .Where(s => s.Item != null && targetLevels.Contains(s.Item.Level))
                     .Where(s => !s.Item!.IsTreasureMap && !s.IsCollectable)
                     .OrderByDescending(s => s.ItemLevel)
                     .FirstOrDefault();
 
                 if (slot != null)
                 {
-                    return (false, slot);
+                    return (true, slot);
                 }
             }
 
@@ -283,14 +265,14 @@ namespace GatherBuddy.AutoGather
             if (GatheringWindowReader == null)
                 throw new InvalidOperationException("GatheringWindowReader is null");
             return GatheringWindowReader.ItemSlots
-                .Where(s => !s.IsEmpty)
-                .Where(s => s.Item.IsCrystal)
+                .Where(s => s.Item != null)
+                .Where(s => s.Item!.IsCrystal)
                 .Where(CheckItemOvercap)
                 //Prioritize crystals in the gathering list
                 .GroupJoin(_activeItemList.Where(i => i.Gatherable?.IsCrystal ?? false), s => s.Item, i => i.Item, (s, x) => (Slot: s, Order: x.Any()?1:0))
                 .OrderBy(x => x.Order)
                 //Prioritize crystals with a lower amount in the inventory
-                .ThenBy(x => x.Slot.Item.GetInventoryCount())
+                .ThenBy(x => x.Slot.Item!.GetInventoryCount())
                 .Select(x => x.Slot)
                 .FirstOrDefault();
         }

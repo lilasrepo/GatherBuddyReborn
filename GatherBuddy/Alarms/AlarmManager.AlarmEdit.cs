@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using GatherBuddy.Interfaces;
 using GatherBuddy.Plugin;
 

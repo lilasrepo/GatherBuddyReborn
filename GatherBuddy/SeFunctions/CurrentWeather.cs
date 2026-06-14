@@ -1,7 +1,6 @@
+using Dalamud.Game;
 using FFXIVClientStructs.FFXIV.Client.Game;
-using GatherBuddy.AutoGather.Helpers;
 using GatherBuddy.Plugin;
-using System;
 
 namespace GatherBuddy.SeFunctions;
 
@@ -16,7 +15,7 @@ public sealed class CurrentWeather : SeAddressBase
     // and the other three are the true weather (based on in-game compass / zone effects / etc).
     // You can use Bismark hard mode to differentiate these, as Bismark's weather
     // effects only affect the true weather.
-    public CurrentWeather(ISigScannerWrapper sigScanner)
+    public CurrentWeather(ISigScanner sigScanner)
         : base(sigScanner, "48 8B 05 ?? ?? ?? ?? 0F B6 12", 8)
     { }
 
@@ -24,27 +23,17 @@ public sealed class CurrentWeather : SeAddressBase
     {
         get
         {
-            try
+            if (Functions.InTheDiadem())
             {
-                if (Diadem.IsInside)
+                var weatherManager = WeatherManager.Instance();
+                if (weatherManager != null)
                 {
-                    var weatherManager = WeatherManager.Instance();
-                    if (weatherManager != null)
-                    {
-                        return weatherManager->GetCurrentWeather();
-                    }
+                    return weatherManager->GetCurrentWeather();
                 }
-                
-                // normal detection for non-Diadem
-                if (Address == IntPtr.Zero)
-                    return 0;
-                
-                return *(byte*)Address;
             }
-            catch
-            {
-                return 0;
-            }
+            
+            // normal detection for non-Diadem
+            return *(byte*)Address;
         }
     }
 }

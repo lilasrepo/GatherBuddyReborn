@@ -1,6 +1,5 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using Dalamud.Game;
-using Dalamud.Game.Chat;
 using Dalamud.Game.Text;
 using Dalamud.Game.Text.SeStringHandling;
 using FFXIVClientStructs.FFXIV.Client.Game.WKS;
@@ -26,7 +25,7 @@ public partial class FishingParser
               && FishingSpotNames.TryGetValue(fishingSpotName[4..], out fishingSpot))
             BeganFishing?.Invoke(fishingSpot);
         else
-            GatherBuddy.Log.Error($"在未知钓场开始钓鱼: \"{fishingSpotName}\"");
+            GatherBuddy.Log.Error($"Began fishing at unknown fishing spot: \"{fishingSpotName}\".");
     }
 
     private void HandleSpotDiscoveredMatch(Match match)
@@ -40,19 +39,18 @@ public partial class FishingParser
               && FishingSpotNames.TryGetValue(fishingSpotName[4..], out fishingSpot))
             IdentifiedSpot?.Invoke(fishingSpot);
         else
-            GatherBuddy.Log.Error($"发现了未知钓场: \"{fishingSpotName}\"");
+            GatherBuddy.Log.Error($"Discovered unknown fishing spot: \"{fishingSpotName}\".");
     }
 
     private const XivChatType FishingMessage = (XivChatType)2243;
 
-    private unsafe void OnMessageDelegate(IHandleableChatMessage chatMessage)
+    private unsafe void OnMessageDelegate(XivChatType type, int timeStamp, ref SeString sender, ref SeString message, ref bool isHandled)
     {
-        switch (chatMessage.LogKind)
+        switch (type)
         {
-            case XivChatType.Gathering:
-            case XivChatType.GatheringSystemMessage:
+            case FishingMessage:
             {
-                var text = chatMessage.Message.TextValue;
+                var text = message.TextValue;
 
                 if (text.Contains(_regexes.Undiscovered))
                 {
@@ -71,7 +69,7 @@ public partial class FishingParser
                         if (wks is not null)
                         {
                             missionId = wks->CurrentMissionUnitRowId;
-                            GatherBuddy.Log.Verbose($"已加载任务: {missionId.Value}");
+                            GatherBuddy.Log.Verbose($"Loaded quest: {missionId.Value}");
                         }
                     }
 

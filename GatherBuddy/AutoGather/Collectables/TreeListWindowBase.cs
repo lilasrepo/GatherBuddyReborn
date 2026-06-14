@@ -1,3 +1,4 @@
+using System;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using FFXIVClientStructs.Interop;
 using FFXIVClientStructs.STD;
@@ -6,15 +7,33 @@ namespace GatherBuddy.AutoGather.Collectables;
 
 public unsafe abstract class TreeListWindowBase
 {
+    protected readonly AtkUnitBase* Addon;
+    protected readonly AtkComponentTreeList* TreeList;
     protected readonly StdVector<Pointer<AtkComponentTreeListItem>> Items;
     protected readonly string[] Labels;
+    protected readonly int ItemCount;
 
     protected TreeListWindowBase(AtkUnitBase* addon)
     {
-        var treeList = FindTreeList(addon);
-        Items = treeList->Items;
-        Labels = new string[(int)treeList->Items.Count];
+        Addon = addon;
+        TreeList = FindTreeList(addon);
+        ItemCount = (int)TreeList->Items.Count;
+        Items = TreeList->Items;
+        Labels = new string[ItemCount];
         PopulateLabels();
+    }
+
+    public int GetItemIndexOf(string label)
+    {
+        for (var i = 0; i < Labels.Length; i++)
+        {
+            GatherBuddy.Log.Debug($"[TreeListWindowBase] GetItemIndexOf({label})");
+            var current = Labels[i];
+            if (current.Contains(label, StringComparison.OrdinalIgnoreCase))
+                return i;
+        }
+
+        return -1;
     }
 
     protected abstract bool IsTargetNode(AtkResNode* node);
@@ -39,7 +58,7 @@ public unsafe abstract class TreeListWindowBase
 
     private void PopulateLabels()
     {
-        for (var i = 0; i < Labels.Length; i++)
+        for (var i = 0; i < ItemCount; i++)
         {
             var item = Items[i].Value;
             Labels[i] = item != null ? ExtractLabel(item) : string.Empty;

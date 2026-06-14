@@ -1,7 +1,9 @@
+using System;
 using System.Collections.Frozen;
+using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using Dalamud;
-using Dalamud.Logging;
 using Dalamud.Game;
 using Dalamud.Plugin.Services;
 using Dalamud.Utility;
@@ -12,7 +14,7 @@ using GatherBuddy.Interfaces;
 using GatherBuddy.Levenshtein;
 using GatherBuddy.Structs;
 using Lumina.Excel.Sheets;
-using ElliLib.Log;
+using OtterGui.Log;
 using Aetheryte = GatherBuddy.Classes.Aetheryte;
 using AetheryteRow = Lumina.Excel.Sheets.Aetheryte;
 using Fish = GatherBuddy.Classes.Fish;
@@ -87,7 +89,7 @@ public class GameData
 
             Weathers = DataManager.GetExcelSheet<WeatherRow>()
                 .ToFrozenDictionary(w => w.RowId, w => new Weather(w));
-            Log.Verbose("已收集 {NumWeathers} 种天气", Weathers.Count);
+            Log.Verbose("Collected {NumWeathers} different Weathers.", Weathers.Count);
 
             CumulativeWeatherRates = DataManager.GetExcelSheet<WeatherRate>()
                 .ToFrozenDictionary(w => (byte)w.RowId, w => new CumulativeWeatherRates(this, w));
@@ -101,67 +103,57 @@ public class GameData
                 .Select(group => group.First())
                 .OrderBy(t => t.Name)
                 .ToArray();
-            Log.Verbose("已收集 {NumWeatherTerritories} 个动态天气区域", WeatherTerritories.Length);
+            Log.Verbose("Collected {NumWeatherTerritories} different territories with dynamic weather.", WeatherTerritories.Length);
 
             Aetherytes = DataManager.GetExcelSheet<AetheryteRow>()
                 .Where(a => a is { IsAetheryte: true, RowId: > 1 } && a.PlaceName.RowId != 0)
                 .ToFrozenDictionary(a => a.RowId, a => new Aetheryte(this, a));
-            Log.Verbose("已收集 {NumAetherytes} 个以太之光", Aetherytes.Count);
+            Log.Verbose("Collected {NumAetherytes} different aetherytes.", Aetherytes.Count);
             ForcedAetherytes.ApplyMissingAetherytes(this);
             if (Aetherytes.Count is 0)
-                throw new Exception("无法获取任何以太之光数据，这肯定是个错误，终止");
+                throw new Exception("Could not fetch any aetherytes, this is certainly an error, terminating.");
 
             Gatherables = DataManager.GetExcelSheet<GatheringItem>()
                 .Where(g => g.Item.RowId != 0 && g.Item.RowId < 1000000 && g.Item.TryGetValue<Item>(out var i) && !i.Name.IsEmpty)
                 .GroupBy(g => g.Item.RowId)
-                // The Diadem items have multiple matching GatheringItem rows; take the newest
-                .Select(group => group.MaxBy(g => g.RowId))
+                .Select(group => group.First())
                 .ToFrozenDictionary(g => g.Item.RowId, g => new Gatherable(this, g));
             GatherablesByGatherId = Gatherables.Values.ToFrozenDictionary(g => g.GatheringId, g => g);
-            Log.Verbose("已收集 {NumGatherables} 个可采集物品", Gatherables.Count);
+            Log.Verbose("Collected {NumGatherables} different gatherable items.", Gatherables.Count);
             if (Gatherables.Count is 0)
-                throw new Exception("无法获取任何可采集物品数据，这肯定是个错误，终止");
+                throw new Exception("Could not fetch any gatherables, this is certainly an error, terminating.");
 
             // Create GatheringItemPoint dictionary.
             var tmpGatheringItemPoint = DataManager.GetSubrowExcelSheet<GatheringItemPoint>().SelectMany(g => g)
                 .GroupBy(row => row.GatheringPoint.RowId)
                 .ToFrozenDictionary(group => group.Key, group => group.Select(g => g.RowId).Distinct().ToList());
 
-            uint[] OddlyDelicateItemIds = [Gatherables[31767].GatheringId, Gatherables[31769].GatheringId];
-
             var tmpGatheringPoints = DataManager.GetExcelSheet<GatheringPoint>()
-                // The Diadem Umbral nodes have PlaceName.RowId == 0, so we have to disable this filter
-                // and filter by TerritoryType.RowId instead.
-                //.Where(row => row.PlaceName.RowId > 0)
-                // Filter out invalid or deleted territories (0 or 1) and old instances of The Diadem (901 or 929),
-                // exept for the Oddly Delicate items which are mapped to the old insance of The Diadem (901).
-                .Where(row => row.TerritoryType.RowId is not (0 or 1 or 901 or 929) 
-                    || row.TerritoryType.RowId == 901 && row.GatheringPointBase.Value.Item.Any(i => OddlyDelicateItemIds.Contains(i.RowId)))
+                .Where(row => row.PlaceName.RowId > 0)
                 .GroupBy(row => row.GatheringPointBase.RowId)
                 .ToFrozenDictionary(group => group.Key, group => group.Select(g => g.RowId).Distinct().ToList());
 
             GatheringNodes = DataManager.GetExcelSheet<GatheringPointBase>()
-                .Where(b => b.GatheringType.RowId < (int)Enums.GatheringType.刺鱼)
+                .Where(b => b.GatheringType.RowId < (int)Enums.GatheringType.Spearfishing)
                 .Select(b => new GatheringNode(this, tmpGatheringPoints, tmpGatheringItemPoint, b))
                 .Where(n => n.Territory.Id > 1 && n.Items.Count > 0)
                 .ToFrozenDictionary(n => n.Id, n => n);
-            Log.Verbose("已收集 {NumGatheringNodes} 个采集点", GatheringNodes.Count);
+            Log.Verbose("Collected {NumGatheringNodes} different gathering nodes", GatheringNodes.Count);
             if (GatheringNodes.Count is 0)
-                throw new Exception("无法获取任何采集点数据，这肯定是个错误，终止");
+                throw new Exception("Could not fetch any gathering nodes, this is certainly an error, terminating.");
 
-            CosmicFishingMissions = DataManager.GetExcelSheet<WKSMissionUnit>()
-                .Where(m => m.Name.ByteLength > 0 && (m.ClassJobCategory[0].RowId is 19 || m.ClassJobCategory[1].RowId is 19))
-                .ToFrozenDictionary(m => (ushort)m.RowId, m => new CosmicMission(m));
-            Log.Verbose("已收集 {NumCosmicMissions} 个宇宙钓鱼任务", CosmicFishingMissions.Count);
+            // API12 stub: Cosmic Exploration is a game-7.5 feature.
+            // WKSMissionUnit.Name and .ClassJobCategory don't exist in TC client's Lumina,
+            // and WKSItemInfo's Cosmic Exploration bait shouldn't materialize on a 7.1 client either.
+            CosmicFishingMissions = System.Collections.Frozen.FrozenDictionary<ushort, CosmicMission>.Empty;
+            Log.Verbose("Cosmic fishing missions skipped: API12 stub (game 7.5 Cosmic Exploration feature).");
 
             Bait = DataManager.GetExcelSheet<Item>()
                 .Where(i => i.ItemSearchCategory.RowId == Structs.Bait.FishingTackleRow)
-                .Concat(DataManager.GetExcelSheet<WKSItemInfo>().Where(i => i.WKSItemSubCategory.RowId is 5)
-                    .Select(i => i.Item.Value))
                 .ToFrozenDictionary(b => b.RowId, b => new Bait(b));
-            Log.Verbose("已收集 {NumBaits} 种钓饵", Bait.Count);
+            Log.Verbose("Collected {NumBaits} different types of bait.", Bait.Count);
             if (Bait.Count is 0)
-                throw new Exception("无法获取任何钓饵数据，这肯定是个错误，终止");
+                throw new Exception("Could not fetch any bait, this is certainly an error, terminating.");
 
             var catchData = DataManager.GetExcelSheet<FishingNoteInfo>();
             Fishes = DataManager.GetExcelSheet<FishParameter>()
@@ -173,15 +165,15 @@ public class GameData
                 .GroupBy(f => f.ItemId)
                 .Select(group => group.First())
                 .ToFrozenDictionary(f => f.ItemId, f => f);
-            Log.Verbose("已收集 {NumFishes} 种鱼类", Fishes.Count);
+            Log.Verbose("Collected {NumFishes} different types of fish.", Fishes.Count);
             if (Fishes.Count is 0)
-                throw new Exception("无法获取任何鱼类数据，这肯定是个错误，终止");
+                throw new Exception("Could not fetch any fish, this is certainly an error, terminating.");
 
             Data.Fish.Apply(this);
             OverriddenFish = Fishes.Values.Count(f => f.HasOverridenData);
 
             FishingSpots = DataManager.GetExcelSheet<FishingSpotRow>()
-                .Where(f => (f.PlaceName.RowId != 0 || f.RowId >= 10017) && (f.TerritoryType.RowId > 0 || f.RowId == 10000 || f.RowId >= 10017))
+                .Where(f => (f.PlaceName.RowId != 0 || f.RowId >= 10017) && (f.TerritoryType.RowId > 0 || f.RowId == 10000 || (f.RowId >= 10017 && f.RowId < 10026)))
                 .Select(f => new FishingSpot(this, f))
                 .Concat(
                     DataManager.GetExcelSheet<SpearfishingNotebook>()
@@ -189,14 +181,15 @@ public class GameData
                         .Select(sf => new FishingSpot(this, sf)))
                 .Where(f => f.Territory.Id != 0)
                 .ToFrozenDictionary(f => f.Id, f => f);
-            Log.Verbose("已收集 {NumFishingSpots} 个钓场", FishingSpots.Count);
+            Log.Verbose("Collected {NumFishingSpots} different fishing spots.", FishingSpots.Count);
             if (FishingSpots.Count is 0)
-                throw new Exception("无法获取任何钓场数据，这肯定是个错误，终止");
+                throw new Exception("Could not fetch any fishing spots, this is certainly an error, terminating.");
 
             Data.SpearfishingData.Apply(this);
 
             HiddenMaps.Apply(this);
             ForcedAetherytes.Apply(this);
+            UmbralNodes.Apply(this);
 
             OceanRoutes   = SetupOceanRoutes(gameData, FishingSpots);
             OceanTimeline = new OceanTimeline(gameData, OceanRoutes);
@@ -204,7 +197,7 @@ public class GameData
 
             foreach (var gatherable in Gatherables.Values)
             {
-                if (gatherable.NodeType != NodeType.无 && !gatherable.NodeList.Any(n => n.Times.AlwaysUp()))
+                if (gatherable.NodeType != NodeType.Unknown && !gatherable.NodeList.Any(n => n.Times.AlwaysUp()))
                     gatherable.InternalLocationId = ++TimedGatherables;
                 else if (gatherable.NodeList.Count > 1)
                     gatherable.InternalLocationId = -++MultiNodeGatherables;
@@ -214,7 +207,6 @@ public class GameData
             foreach (var fish in Fishes.Values)
             {
                 if (fish.FishingSpots.Count > 0 && !fish.OceanFish && fish.FishRestrictions != FishRestrictions.None
-                    && (fish.CurrentWeather.Length == 0 || !fish.CurrentWeather[0].IsUmbral)
                  || fish is { OceanFish: true, FishRestrictions: FishRestrictions.Time })
                     fish.InternalLocationId = ++TimedGatherables;
                 else if (fish.FishingSpots.Count > 0)
@@ -224,7 +216,7 @@ public class GameData
         }
         catch (Exception e)
         {
-            Log.Error($"设置数据时出错:\n{e}");
+            Log.Error($"Error while setting up data:\n{e}");
         }
     }
 
@@ -232,10 +224,6 @@ public class GameData
     {
         if (t == null || t.Value.RowId < 2)
             return null;
-
-        // Upgrade The Diadem territory to the latest instance
-        if (t.Value.RowId is 901 or 929)
-            t = DataManager.GetExcelSheet<TerritoryType>().GetRow(939);
 
         if (Territories.TryGetValue(t.Value.RowId, out var territory))
             return territory;
@@ -264,7 +252,7 @@ public class GameData
         {
             var spot = fish.FishData?.FishingSpot.RowId ?? 0u;
             if (set.TryGetValue(spot, out var area))
-                fish.OceanArea = fish.OceanArea is OceanArea.None || fish.OceanArea == area ? area : OceanArea.Unknown;
+                fish.OceanArea = fish.OceanArea == OceanArea.None || fish.OceanArea == area ? area : OceanArea.Unknown;
         }
     }
 
@@ -277,7 +265,7 @@ public class GameData
         var spots = spotSheet.Skip(1).Select(r
                 => fishingSpots.TryGetValue(r.SpotMain.RowId, out var main) && fishingSpots.TryGetValue(r.SpotSub.RowId, out var sub)
                     ? (main, Sub: sub)
-                    : throw new Exception("无效的钓场"))
+                    : throw new Exception("Invalid fishing spot!"))
             .ToArray();
 
         for (var i = 1u; i < routeSheet.Count; ++i)
@@ -285,13 +273,13 @@ public class GameData
             var row = routeSheet.GetRow(i);
             var (start, day, sunset, night) = row.Time[0].RowId switch
             {
-                1 => (Sunset: OceanTime.日落, spots[(int)row.Spot[1].RowId - 1], spots[(int)row.Spot[2].RowId - 1],
+                1 => (OceanTime.Sunset, spots[(int)row.Spot[1].RowId - 1], spots[(int)row.Spot[2].RowId - 1],
                     spots[(int)row.Spot[0].RowId - 1]),
-                2 => (Night: OceanTime.夜晚, spots[(int)row.Spot[0].RowId - 1], spots[(int)row.Spot[1].RowId - 1],
+                2 => (OceanTime.Night, spots[(int)row.Spot[0].RowId - 1], spots[(int)row.Spot[1].RowId - 1],
                     spots[(int)row.Spot[2].RowId - 1]),
-                3 => (Day: OceanTime.白昼, spots[(int)row.Spot[2].RowId - 1], spots[(int)row.Spot[0].RowId - 1],
+                3 => (OceanTime.Day, spots[(int)row.Spot[2].RowId - 1], spots[(int)row.Spot[0].RowId - 1],
                     spots[(int)row.Spot[1].RowId - 1]),
-                _ => (Sunset: OceanTime.日落, spots[(int)row.Spot[1].RowId - 1], spots[(int)row.Spot[2].RowId - 1],
+                _ => (OceanTime.Sunset, spots[(int)row.Spot[1].RowId - 1], spots[(int)row.Spot[2].RowId - 1],
                     spots[(int)row.Spot[0].RowId - 1]),
             };
             ret[i - 1] = new OceanRoute
@@ -302,12 +290,7 @@ public class GameData
                 SpotDay    = day,
                 SpotSunset = sunset,
                 SpotNight  = night,
-                Area       = i switch
-                {
-                    < 13 => OceanArea.Aldenard,
-                    < 22 => OceanArea.Othard,
-                    _ => OceanArea.Unknown,
-                },
+                Area       = i < 13 ? OceanArea.Aldenard : i < 19 ? OceanArea.Othard : OceanArea.Unknown,
             };
         }
 

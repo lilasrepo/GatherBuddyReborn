@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using GatherBuddy.Interfaces;
 using GatherBuddy.Time;
-using ElliLib;
+using OtterGui;
 using System.Linq;
 using System.Numerics;
-using Dalamud.Bindings.ImGui;
+using ImGuiNET;
 using Dalamud.Interface;
 using Dalamud.Interface.Components;
 using Dalamud.Interface.Utility;
@@ -16,8 +16,8 @@ using GatherBuddy.GatherGroup;
 using GatherBuddy.GatherHelper;
 using GatherBuddy.AutoGather.Lists;
 using GatherBuddy.Plugin;
-using ElliLib.Widgets;
-using ImRaii = ElliLib.Raii.ImRaii;
+using OtterGui.Widgets;
+using ImRaii = OtterGui.Raii.ImRaii;
 
 namespace GatherBuddy.Gui;
 
@@ -111,7 +111,7 @@ public partial class Interface
             .GameData
             .Gatherables.Values
             .Concat(GatherBuddy.GameData.Fishes.Values.Cast<IGatherable>())
-            .Where(g => g.Locations.Count != 0)
+            .Where(g => g.Locations.Any())
             .OrderBy(g => g.Name[GatherBuddy.Language])
             .ToArray();
 
@@ -162,8 +162,8 @@ public partial class Interface
         {
             Selector = new GatherGroupSelector(gatherGroupManager);
             DefaultGroupTooltip =
-                "重新加载默认提供的采集组(如果它们被删除或以任何方式修改过)\n"
-              + "按住 Ctrl 键点击以应用，默认采集组包括：\n\t- "
+                "Restore the gather groups provided by default if they have been deleted or changed in any way.\n"
+              + "Hold Control to apply. Default Groups are:\n\t- "
               + $"{string.Join("\n\t- ", GroupData.DefaultGroups.Select(g => g.Name))}";
         }
     }
@@ -199,15 +199,15 @@ public partial class Interface
         var       width = 20 * ImGuiHelpers.GlobalScale;
         using var group = ImRaii.Group();
 
-        ImGui.Text(" 从 ");
+        ImGui.Text(" from ");
         ImGui.SameLine();
         DrawTimeInput("##from", width, fromValue, v => setter(v, toValue));
         ImGui.SameLine();
-        ImGui.Text(" 到 ");
+        ImGui.Text(" to ");
         ImGui.SameLine();
         DrawTimeInput("##to", width, toValue, v => setter(fromValue, v));
         ImGui.SameLine();
-        ImGui.Text(" 艾欧泽亚时间 ET");
+        ImGui.Text(" Eorzea Time");
     }
 
     private static void DrawLocationTooltip(ILocation? loc)
@@ -217,7 +217,7 @@ public partial class Interface
 
         var tt = $"{string.Join("\n", loc.Gatherables.Select(g => g.Name[GatherBuddy.Language]))}";
         if (loc is GatheringNode g)
-            tt = $"{loc.Territory.Name}\n{EnumLocalization.Get(loc.GatheringType)}\n{g.Times.PrintHours()}\n{tt}"; // 修改为中文
+            tt = $"{loc.Territory.Name}\n{loc.GatheringType}\n{g.Times.PrintHours()}\n{tt}";
         ImGui.SetTooltip(tt);
     }
 
@@ -235,7 +235,7 @@ public partial class Interface
         var       i              = idx;
         var       annotationEdit = _gatherGroupCache.AnnotationEditIdx;
         ImGui.TableNextColumn();
-        if (ImGuiUtil.DrawDisabledButton(FontAwesomeIcon.Trash.ToIconString(), IconButtonSize, "删除此物品", false, true))
+        if (ImGuiUtil.DrawDisabledButton(FontAwesomeIcon.Trash.ToIconString(), IconButtonSize, "Delete this item.", false, true))
             if (_plugin.GatherGroupManager.ChangeGroupNode(group, i, null, null, null, null, true))
             {
                 --idx;
@@ -265,17 +265,17 @@ public partial class Interface
         DrawLocationInput(group, i, node);
         ImGui.TableNextColumn();
         var length = node.Length();
-        ImGuiUtil.DrawTextButton($"{length}", Vector2.Zero,
+        ImGuiUtil.DrawTextButton($"{length} minutes", Vector2.Zero,
             minutes < length ? ColorId.WarningBg.Value() : ImGui.GetColorU32(ImGuiCol.FrameBg));
         if (minutes < length)
-            HoverTooltip($"有 {length - minutes} 分钟因为设置了早于采集品的出现时间被覆盖");
+            HoverTooltip($"{length - minutes} minutes are overwritten by overlap with earlier items.");
 
 
         ImGui.TableNextColumn();
         var annotation = node.Annotation;
         if (_gatherGroupCache.AnnotationEditIdx != i)
         {
-            ImGuiComponents.HelpMarker(annotation.Length > 0 ? annotation : "无注释，右键点击以进行编辑");
+            ImGuiComponents.HelpMarker(annotation.Length > 0 ? annotation : "No annotation. Right-click to edit.");
             if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
             {
                 _gatherGroupCache.AnnotationEditIdx = i;
@@ -290,7 +290,7 @@ public partial class Interface
         else
         {
             ImGui.SetNextItemWidth(400 * ImGuiHelpers.GlobalScale);
-            if (ImGui.InputTextWithHint("##annotation", "注释...", ref annotation, 256, ImGuiInputTextFlags.EnterReturnsTrue)
+            if (ImGui.InputTextWithHint("##annotation", "Annotation...", ref annotation, 256, ImGuiInputTextFlags.EnterReturnsTrue)
              && _plugin.GatherGroupManager.ChangeGroupNode(group, i, null, null, null, annotation, false))
                 _plugin.GatherGroupManager.Save();
             if (annotationEdit == _gatherGroupCache.AnnotationEditIdx && !ImGui.IsItemActive())
@@ -301,7 +301,7 @@ public partial class Interface
     private static void DrawMissingTimesHint(bool missingTimes)
     {
         if (missingTimes)
-            ImGuiUtil.DrawTextButton("部分时间段缺少对应的采集品", new Vector2(-ImGui.GetStyle().WindowPadding.X, 0),
+            ImGuiUtil.DrawTextButton("Not all minutes have a corresponding item.", new Vector2(-ImGui.GetStyle().WindowPadding.X, 0),
                 ColorId.WarningBg.Value());
     }
 
@@ -319,12 +319,12 @@ public partial class Interface
 
         var idx = _gatherGroupCache.NewItemIdx;
         ImGui.TableNextColumn();
-        if (ImGuiUtil.DrawDisabledButton(FontAwesomeIcon.Plus.ToIconString(), IconButtonSize, "添加新物品...", false, true))
+        if (ImGuiUtil.DrawDisabledButton(FontAwesomeIcon.Plus.ToIconString(), IconButtonSize, "Add new item...", false, true))
         {
             var gatherable = GatherGroupCache.AllGatherables[idx];
             if (gatherable.InternalLocationId > 0)
             {
-                var locations = gatherable.Locations;
+                var locations = gatherable.Locations.ToList();
                 if (locations.Count is 1 && locations[0] is GatheringNode node)
                 {
                     var changes = false;
@@ -362,13 +362,13 @@ public partial class Interface
         if (newName.Length == 0)
         {
             ImGui.SameLine();
-            ImGuiUtil.DrawTextButton("名称不能为空", Vector2.Zero, ColorId.WarningBg.Value());
+            ImGuiUtil.DrawTextButton("Name can not be empty.", Vector2.Zero, ColorId.WarningBg.Value());
             r = false;
         }
         else if (newName != group.Name && _plugin.GatherGroupManager.Groups.ContainsKey(newName.ToLowerInvariant().Trim()))
         {
             ImGui.SameLine();
-            ImGuiUtil.DrawTextButton("名称已经被使用", Vector2.Zero, ColorId.WarningBg.Value());
+            ImGuiUtil.DrawTextButton("Name is already in use.", Vector2.Zero, ColorId.WarningBg.Value());
             r = false;
         }
 
@@ -399,7 +399,7 @@ public partial class Interface
 
     private void DrawGatherGroupHeaderLine()
     {
-        if (ImGuiUtil.DrawDisabledButton(FontAwesomeIcon.Copy.ToIconString(), IconButtonSize, "复制当前采集组到剪贴板",
+        if (ImGuiUtil.DrawDisabledButton(FontAwesomeIcon.Copy.ToIconString(), IconButtonSize, "Copy current Gather Group to clipboard.",
                 _gatherGroupCache.Selector.Current == null, true))
         {
             var group = _gatherGroupCache.Selector.Current!;
@@ -407,29 +407,29 @@ public partial class Interface
             {
                 var s = group.ToConfig().ToBase64();
                 ImGui.SetClipboardText(s);
-                Communicator.PrintClipboardMessage("采集组 ", group.Name);
+                Communicator.PrintClipboardMessage("Gather Group ", group.Name);
             }
             catch (Exception e)
             {
-                Communicator.PrintClipboardMessage("采集组 ", group.Name, e);
+                Communicator.PrintClipboardMessage("Gather Group ", group.Name, e);
             }
         }
 
-        if (ImGuiUtil.DrawDisabledButton("创建自动采集列表", Vector2.Zero, "为该采集组新建一个自动采集列表",
+        if (ImGuiUtil.DrawDisabledButton("Create Auto-Gather List", Vector2.Zero, "Create a new Auto-Gather List from this gather group.",
                 _gatherGroupCache.Selector.Current == null))
         {
             var preset = new AutoGatherList(_gatherGroupCache.Selector.Current!);
             _plugin.AutoGatherListsManager.AddList(preset);
         }
 
-        if (ImGuiUtil.DrawDisabledButton("创建采集窗口预设", Vector2.Zero, "为该采集组新建一个采集窗口预设",
+        if (ImGuiUtil.DrawDisabledButton("Create Window Preset", Vector2.Zero, "Create a new Gather Window Preset from this gather group.",
                 _gatherGroupCache.Selector.Current == null))
         {
             var preset = new GatherWindowPreset(_gatherGroupCache.Selector.Current!);
             _plugin.GatherWindowManager.AddPreset(preset);
         }
 
-        if (ImGuiUtil.DrawDisabledButton("创建闹钟", Vector2.Zero, "创建当前采集组的采集闹钟",
+        if (ImGuiUtil.DrawDisabledButton("Create Alarms", Vector2.Zero, "Create a new Alarm Group from this gather group.",
                 _gatherGroupCache.Selector.Current == null))
         {
             var preset = new AlarmGroup(_gatherGroupCache.Selector.Current!);
@@ -438,7 +438,7 @@ public partial class Interface
 
         var       holdingCtrl = ImGui.GetIO().KeyCtrl;
         using var color       = ImRaii.PushColor(ImGuiCol.ButtonHovered, 0x8000A000, holdingCtrl);
-        if (ImGui.Button("重新加载默认组") && holdingCtrl && _plugin.GatherGroupManager.SetDefaults(true))
+        if (ImGui.Button("Restore Default Groups") && holdingCtrl && _plugin.GatherGroupManager.SetDefaults(true))
         {
             _gatherGroupCache.Selector.TryRestoreCurrent();
             _plugin.GatherGroupManager.Save();
@@ -449,19 +449,19 @@ public partial class Interface
 
         ImGui.SameLine();
 
-        ImGuiComponents.HelpMarker("使用 /gathergroup [name] [可选:延迟 (分钟)] 来执行一个采集组\n"
-          + "执行后将会采集对应采集组里当前可用或在预设延迟时可用的物品\n"
-          + "如果存在多个可采集物品, 则按照采集组列表内由上到下的优先级顺序执行采集");
+        ImGuiComponents.HelpMarker("Use /gathergroup [name] [optional:minute offset] to call a group.\n"
+          + "This will /gather the item that is up currently (or [minute offset] eorzea minutes in the future).\n"
+          + "If times for multiple items overlap, the first item from top to bottom will be gathered.");
     }
 
     private void DrawGatherGroupTab()
     {
         using var id  = ImRaii.PushId("Gather Groups");
-        using var tab = ImRaii.TabItem("采集组");
+        using var tab = ImRaii.TabItem("Gather Groups");
 
         ImGuiUtil.HoverTooltip(
-            "你真的需要在晚上 8 点到 10 点钓那条肮脏鲱, 而其他时间又要去采集秘银矿吗？\n"
-          + "那就创建你自己的采集组吧！你甚至还能把它分享给别人！");
+            "Do you really need to catch a Dirty Herry from 8PM to 10PM but gather mythril ore otherwise?\n"
+          + "Set up your own gather groups! You can even share them with others!");
 
         if (!tab)
             return;
@@ -469,7 +469,7 @@ public partial class Interface
         _gatherGroupCache.Selector.Draw(SelectorWidth);
         ImGui.SameLine();
 
-        ItemDetailsWindow.Draw("采集组详情", DrawGatherGroupHeaderLine, () =>
+        ItemDetailsWindow.Draw("Group Details", DrawGatherGroupHeaderLine, () =>
         {
             if (_gatherGroupCache.Selector.Current != null)
                 DrawGatherGroup(_gatherGroupCache.Selector.Current);

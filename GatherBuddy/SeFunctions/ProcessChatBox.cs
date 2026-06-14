@@ -1,5 +1,5 @@
 using System;
-using Dalamud.Plugin.Services;
+using Dalamud.Game;
 
 namespace GatherBuddy.SeFunctions;
 

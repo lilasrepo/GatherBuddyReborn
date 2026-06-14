@@ -1,9 +1,9 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
-using GatherBuddy.Helpers;
+using ECommons.GameHelpers;
+using ECommons.Throttlers;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using Lumina.Excel.Sheets;
-using GatherBuddy.Utilities;
 
 namespace GatherBuddy.AutoGather
 {
@@ -36,7 +36,7 @@ namespace GatherBuddy.AutoGather
 
         public static unsafe int GetInventoryItemCount(uint itemRowId)
         {
-            return InventoryManager.Instance()->GetInventoryItemCount(itemRowId < 1_000_000 ? itemRowId : itemRowId - 1_000_000, itemRowId >= 1_000_000);
+            return InventoryManager.Instance()->GetInventoryItemCount(itemRowId < 100000 ? itemRowId : itemRowId - 100000, itemRowId >= 100000);
         }
 
         private static uint[] GetItemFoodProps(Item item)
@@ -52,7 +52,7 @@ namespace GatherBuddy.AutoGather
 
         private static bool IsItemCordial(Item item)
         {
-            return item.RowId is 6141 or 12669 or 16911;
+            return item.ItemAction.ValueNullable?.Type == 1055;
         }
 
         private static bool IsItemDoLFood(Item item)
@@ -76,7 +76,9 @@ namespace GatherBuddy.AutoGather
 
         private static bool IsItemDoLManual(Item item)
         {
-            return item.RowId is 12668 or 4633 or 4635 or 26553;
+            if (item.ItemUICategory.RowId != 63)
+                return false;
+            return item.ItemAction.ValueNullable?.Type == 816 && item.ItemAction.ValueNullable?.Data[0] is 302 or 303 or 1752 or 5330;
         }
 
         private static bool IsItemDoLSquadronManual(Item item)
@@ -100,15 +102,15 @@ namespace GatherBuddy.AutoGather
 
         public unsafe bool GetIsFoodBuffUp(uint itemId)
         {
-            var buff = Player.Status.FirstOrDefault(s => s.StatusId == 48);
+            var buff = Dalamud.ClientState?.LocalPlayer?.StatusList.FirstOrDefault(s => s.StatusId == 48);
             if (buff == null)
             {
                 return false;
             }
             else
             {
-                var configuredItem = PossibleFoods.FirstOrDefault(item => new[] { item.RowId, item.RowId + 1_000_000 }.Contains(itemId));
-                if (itemId > 1_000_000)
+                var configuredItem = PossibleFoods.FirstOrDefault(item => new[] { item.RowId, item.RowId + 100000 }.Contains(itemId));
+                if (itemId > 100000)
                 {
                     return buff.Param == configuredItem.ItemAction.ValueNullable?.DataHQ[1] + 10000;
                 }
@@ -121,15 +123,15 @@ namespace GatherBuddy.AutoGather
 
         public unsafe bool GetIsPotionBuffUp(uint itemId)
         {
-            var buff = Player.Status.FirstOrDefault(s => s.StatusId == 49);
+            var buff = Dalamud.ClientState?.LocalPlayer?.StatusList.FirstOrDefault(s => s.StatusId == 49);
             if (buff == null)
             {
                 return false;
             }
             else
             {
-                var configuredItem = PossiblePotions.FirstOrDefault(item => new[] { item.RowId, item.RowId + 1_000_000 }.Contains(itemId));
-                if (itemId > 1_000_000)
+                var configuredItem = PossiblePotions.FirstOrDefault(item => new[] { item.RowId, item.RowId + 100000 }.Contains(itemId));
+                if (itemId > 100000)
                 {
                     return buff.Param == configuredItem.ItemAction.ValueNullable?.DataHQ[1] + 10000;
                 }
@@ -140,13 +142,13 @@ namespace GatherBuddy.AutoGather
             }
         }
 
-        public unsafe bool IsManualBuffUp => Player.Status.Any(s => s.StatusId == 46);
+        public unsafe bool IsManualBuffUp => Dalamud.ClientState?.LocalPlayer?.StatusList.Any(s => s.StatusId == 46) ?? false;
 
         public unsafe bool GetIsSquadronManualBuffUp(uint itemId)
         {
             if (SquadronManualItemIdBuffId.TryGetValue(itemId, out var requiredBuffId))
             {
-                return Player.Status.Any(s => s.StatusId == requiredBuffId);
+                return Dalamud.ClientState?.LocalPlayer?.StatusList.Any(s => s.StatusId == requiredBuffId) ?? false;
             }
             else
             {
@@ -158,7 +160,7 @@ namespace GatherBuddy.AutoGather
         {
             if (SquadronPassItemIdBuffId.TryGetValue(itemId, out var requiredBuffId))
             {
-                return Player.Status.Any(s => s.StatusId == requiredBuffId);
+                return Dalamud.ClientState?.LocalPlayer?.StatusList.Any(s => s.StatusId == requiredBuffId) ?? false;
             }
             else
             {
@@ -168,18 +170,20 @@ namespace GatherBuddy.AutoGather
 
         private unsafe void UseItem(uint itemId)
         {
-            ActionManager.Instance()->UseAction(ActionType.Item, itemId, extraParam: 65535);
+            // When calling ActionManager UseAction, HQ have ids 1,000,000 more than NQ, whereas Lumina Excel is 100,000
+            ActionManager.Instance()->UseAction(ActionType.Item, itemId > 100000 ? itemId + 900000 : itemId, extraParam: 65535);
         }
 
         // Cordial, food and potion have no cast time and can be used while mounted
         private bool DoUseConsumablesWithoutCastTime(ConfigPreset config, bool skipThrottle = false)
         {
-            if (Throttler.Throttle("DoUseConsumablesWithoutCastTime", 5000) || skipThrottle)
+            // Check if consumables need to be refreshed every 5 seconds
+            // Give sufficient time for buffs to activate otherwise items could be used multiple times and wasted
+            if (EzThrottler.Throttle("DoUseConsumablesWithoutCastTime", 5000) || skipThrottle)
             {
                 if (config.Consumables.Cordial.Enabled
                     && config.Consumables.Cordial.ItemId > 0
                     && !IsCordialOnCooldown
-                    && Player.Object != null
                     && Player.Object.CurrentGp >= config.Consumables.Cordial.MinGP
                     && Player.Object.CurrentGp <= config.Consumables.Cordial.MaxGP
                     && Player.Object.CurrentGp < Player.Object.MaxGp

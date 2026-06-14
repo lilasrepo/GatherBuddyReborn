@@ -1,7 +1,7 @@
-using GatherBuddy.Classes;
+﻿using GatherBuddy.Classes;
 using System;
+using ECommons.DalamudServices;
 using Newtonsoft.Json;
-using GatherBuddy.Interfaces;
 
 namespace GatherBuddy.AutoGather
 {
@@ -37,7 +37,6 @@ namespace GatherBuddy.AutoGather
         public bool SpendGPOnBestNodesOnly { get; set; } = false;
         public GatheringActionsRec GatherableActions { get; init; } = new();
         public CollectableActionsRec CollectableActions { get; init; } = new();
-        public FishingActionsRec FishingActions { get; init; } = new();
         public ConsumablesRec Consumables { get; init; } = new();
     
         public record class ActionConfig
@@ -80,18 +79,6 @@ namespace GatherBuddy.AutoGather
         {
             public uint ItemId { get; set; } = 0;
         }
-        public record class ToggleConfig
-        {
-            public bool Enabled { get; set; } = true;
-        }
-        public record class FishingActionConfig
-        {
-            private int gpThreshold = 0;
-
-            public bool Enabled { get; set; } = false;
-            public int GpThreshold { get => gpThreshold; set => gpThreshold = Math.Max(0, Math.Min(ConfigPreset.MaxGP, value)); }
-            public bool GpThresholdAbove { get; set; } = true;
-        }
 
         public record class LevelRec {
             private int min = 1;
@@ -117,32 +104,29 @@ namespace GatherBuddy.AutoGather
             public bool Unspoiled { get; set; } = true;
             public bool Legendary { get; set; } = true;
             public bool Ephemeral { get; set; } = true;
-            public bool Clouded { get; set; } = true;
         }
         public record class GatheringActionsRec
         {
-            public ActionConfig           Luck          { get; init; } = new() { MinGP = AutoGather.Actions.Luck.GpCost };
-            public ActionConfigYieldBonus Bountiful     { get; init; } = new() { MinGP = AutoGather.Actions.Bountiful.GpCost};
-            public ActionConfigIntegrity  Yield1        { get; init; } = new() { MinGP = AutoGather.Actions.Yield1.GpCost, Enabled = false };
-            public ActionConfigIntegrity  Yield2        { get; init; } = new() { MinGP = AutoGather.Actions.Yield2.GpCost};
-            public ActionConfigYieldTotal SolidAge      { get; init; } = new() { MinGP = AutoGather.Actions.SolidAge.GpCost};
-            public ActionConfigIntegrity  TwelvesBounty { get; init; } = new() { MinGP = AutoGather.Actions.TwelvesBounty.GpCost };
-            public ActionConfigIntegrity  GivingLand    { get; init; } = new() { MinGP = AutoGather.Actions.GivingLand.GpCost};
-            public ActionConfigBoon       Gift1         { get; init; } = new() { MinGP = AutoGather.Actions.Gift1.GpCost, Enabled = false, MaxBoonChance = 90 };
-            public ActionConfigBoon       Gift2         { get; init; } = new() { MinGP = AutoGather.Actions.Gift2.GpCost, Enabled = false, MaxBoonChance = 70 };
-            public ActionConfigBoon       Tidings       { get; init; } = new() { MinGP = AutoGather.Actions.Tidings.GpCost, Enabled = false, MinBoonChance = 70 };
+            public ActionConfigYieldBonus Bountiful { get; init; } = new() { MinGP = AutoGather.Actions.Bountiful.GpCost};
+            public ActionConfigIntegrity Yield1 { get; init; } = new() { MinGP = AutoGather.Actions.Yield1.GpCost, Enabled = false };
+            public ActionConfigIntegrity Yield2 { get; init; } = new() { MinGP = AutoGather.Actions.Yield2.GpCost};
+            public ActionConfigYieldTotal SolidAge { get; init; } = new() { MinGP = AutoGather.Actions.SolidAge.GpCost};
+            public ActionConfigIntegrity TwelvesBounty { get; init; } = new() { MinGP = AutoGather.Actions.TwelvesBounty.GpCost };
+            public ActionConfigIntegrity GivingLand { get; init; } = new() { MinGP = AutoGather.Actions.GivingLand.GpCost};
+            public ActionConfigBoon Gift1 { get; init; } = new() { MinGP = AutoGather.Actions.Gift1.GpCost, Enabled = false, MaxBoonChance = 90 };
+            public ActionConfigBoon Gift2 { get; init; } = new() { MinGP = AutoGather.Actions.Gift2.GpCost, Enabled = false, MaxBoonChance = 70 };
+            public ActionConfigBoon Tidings { get; init; } = new() { MinGP = AutoGather.Actions.Tidings.GpCost, Enabled = false, MinBoonChance = 70 };
             public GatheringActionsRec(GatheringActionsRec original)
             {
-                Luck          = original.Luck          with { };
-                Bountiful     = original.Bountiful     with { };
-                Yield1        = original.Yield1        with { };
-                Yield2        = original.Yield2        with { };
-                SolidAge      = original.SolidAge      with { };
+                Bountiful = original.Bountiful with { };
+                Yield1 = original.Yield1 with { };
+                Yield2 = original.Yield2 with { };
+                SolidAge = original.SolidAge with { };
                 TwelvesBounty = original.TwelvesBounty with { };
-                GivingLand    = original.GivingLand    with { };
-                Gift1         = original.Gift1         with { };
-                Gift2         = original.Gift2         with { };
-                Tidings       = original.Tidings       with { };
+                GivingLand = original.GivingLand with { };
+                Gift1 = original.Gift1 with { };
+                Gift2 = original.Gift2 with { };
+                Tidings = original.Tidings with { };
             }
         };
         public record class CollectableActionsRec
@@ -159,26 +143,6 @@ namespace GatherBuddy.AutoGather
                 Brazen = original.Brazen with { };
                 Meticulous = original.Meticulous with { };
                 SolidAge = original.SolidAge with { };
-            }
-        }
-        public record class FishingActionsRec
-        {
-            public ToggleConfig        Patience      { get; init; } = new() { Enabled = true };
-            public FishingActionConfig PrizeCatch    { get; init; } = new() { GpThreshold = AutoGather.Actions.PrizeCatch.GpCost };
-            public FishingActionConfig Chum          { get; init; } = new() { GpThreshold = AutoGather.Actions.Chum.GpCost };
-            public FishingActionConfig SurfaceSlap   { get; init; } = new() { GpThreshold = AutoGather.Actions.SurfaceSlap.GpCost };
-            public FishingActionConfig IdenticalCast { get; init; } = new() { GpThreshold = AutoGather.Actions.IdenticalCast.GpCost };
-            public FishingActionConfig AmbitiousLure { get; init; } = new() { GpThreshold = 200 };
-            public FishingActionConfig ModestLure    { get; init; } = new() { GpThreshold = 200, GpThresholdAbove = false };
-            public FishingActionsRec(FishingActionsRec original)
-            {
-                Patience      = original.Patience with { };
-                PrizeCatch    = original.PrizeCatch with { };
-                Chum          = original.Chum with { };
-                SurfaceSlap   = original.SurfaceSlap with { };
-                IdenticalCast = original.IdenticalCast with { };
-                AmbitiousLure = original.AmbitiousLure with { };
-                ModestLure    = original.ModestLure with { };
             }
         }
         public record class ConsumablesRec
@@ -223,7 +187,6 @@ namespace GatherBuddy.AutoGather
 
             GatherableActions = original.GatherableActions with { };
             CollectableActions = original.CollectableActions with { };
-            FishingActions = original.FishingActions with { };
             Consumables = original.Consumables with { };
         }
 
@@ -239,38 +202,38 @@ namespace GatherBuddy.AutoGather
             };
         }
 
-        public bool Match(IGatherable item)
+        public bool Match(Gatherable item)
         {
             if (!Enabled)
                 return false;
 
-            if (item is Fish && ItemType.Fish)
-                return true;
-
-            if (item is not Gatherable gatherable)
-                return false;
-
-            var levelMatch = !ItemLevel.UseGlv && gatherable.Level >= ItemLevel.Min && gatherable.Level <= ItemLevel.Max
-                          || ItemLevel.UseGlv && gatherable.GatheringData.GatheringItemLevel.RowId >= ItemLevel.Min && gatherable.GatheringData.GatheringItemLevel.RowId <= ItemLevel.Max;
+            var levelMatch = !ItemLevel.UseGlv && item.Level >= ItemLevel.Min && item.Level <= ItemLevel.Max
+                          || ItemLevel.UseGlv && item.GatheringData.GatheringItemLevel.RowId >= ItemLevel.Min && item.GatheringData.GatheringItemLevel.RowId <= ItemLevel.Max;
             if (!levelMatch)
                 return false;
 
-            var nodeTypeMatch = gatherable.NodeType switch
+            // Treat umbral items as Legendary for preset matching
+            var isUmbralItem = Data.UmbralNodes.IsUmbralItem(item.ItemId);
+            var nodeTypeMatch = isUmbralItem
+                ? NodeType.Legendary
+                : item.NodeType switch
                 {
-                    Enums.NodeType.常规 => NodeType.Regular,
-                    Enums.NodeType.未知 => NodeType.Unspoiled,
-                    Enums.NodeType.传说 => NodeType.Legendary,
-                    Enums.NodeType.限时 => NodeType.Ephemeral,
-                    Enums.NodeType.梦幻 => NodeType.Clouded,
+                    Enums.NodeType.Regular => NodeType.Regular,
+                    Enums.NodeType.Unspoiled => NodeType.Unspoiled,
+                    Enums.NodeType.Legendary => NodeType.Legendary,
+                    Enums.NodeType.Ephemeral => NodeType.Ephemeral,
                     _ => false
                 };
             if (!nodeTypeMatch)
                 return false;
 
-            return gatherable.IsCrystal && ItemType.Crystals
-                || gatherable.ItemData.IsCollectable && ItemType.Collectables
-                || !gatherable.IsCrystal && !gatherable.ItemData.IsCollectable && ItemType.Other;
+            return item.IsCrystal && ItemType.Crystals
+                || item.ItemData.IsCollectable && ItemType.Collectables
+                || !item.IsCrystal && !item.ItemData.IsCollectable && ItemType.Other;
         }
+
+        public bool Match(Fish fish)
+            => Enabled && ItemType.Fish;
 
         public string ToBase64String()
         {
@@ -292,7 +255,7 @@ namespace GatherBuddy.AutoGather
             }
             catch (Exception ex)
             {
-                GatherBuddy.Log.Debug($"反序列化配置预设失败: {ex}");
+                Svc.Log.Debug($"Failed to deserialize config preset: {ex}");
                 return null;
             }
         }

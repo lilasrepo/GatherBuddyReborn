@@ -2,11 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using Dalamud.Bindings.ImGui;
+using ImGuiNET;
 using Dalamud.Interface.Windowing;
 using GatherBuddy.Time;
 using Functions = GatherBuddy.Plugin.Functions;
-using ImRaii = ElliLib.Raii.ImRaii;
+using ImRaii = OtterGui.Raii.ImRaii;
 
 namespace GatherBuddy.Gui;
 

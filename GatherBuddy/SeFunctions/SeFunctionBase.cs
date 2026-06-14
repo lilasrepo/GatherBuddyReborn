@@ -1,5 +1,6 @@
-using System;
+﻿using System;
 using System.Runtime.InteropServices;
+using Dalamud.Game;
 using Dalamud.Hooking;
 using Dalamud.Plugin.Services;
 
@@ -18,12 +19,10 @@ public class SeFunctionBase<T> where T : Delegate
 
     public SeFunctionBase(ISigScanner sigScanner, string signature, int offset = 0)
     {
-        if (sigScanner.TryScanText(signature, out var ptr))
-            Address = (IntPtr)ptr + offset;
-        else
-            Address = IntPtr.Zero;
-        
-        var baseOffset = Address != IntPtr.Zero ? (ulong)Address.ToInt64() - (ulong)sigScanner.Module.BaseAddress.ToInt64() : 0;
+        Address = sigScanner.ScanText(signature);
+        if (Address != IntPtr.Zero)
+            Address += offset;
+        var baseOffset = (ulong)Address.ToInt64() - (ulong)sigScanner.Module.BaseAddress.ToInt64();
         GatherBuddy.Log.Debug($"{GetType().Name} address 0x{Address.ToInt64():X16}, baseOffset 0x{baseOffset:X16}.");
     }
 

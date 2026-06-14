@@ -1,10 +1,13 @@
-using GatherBuddy.Utility;
+﻿using ECommons.EzIpcManager;
+using ECommons.Reflection;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Numerics;
 using System.Threading;
 using System.Threading.Tasks;
+using ECommons.DalamudServices;
+using ECommons.EzSharedDataManager;
 
 #pragma warning disable CS0649 // Field is never assigned to, and will always have its default value
 namespace GatherBuddy.Plugin
@@ -12,7 +15,7 @@ namespace GatherBuddy.Plugin
     internal static class IPCSubscriber
     {
         public static bool IsReady(string pluginName)
-            => ReflectionHelpers.IsPluginLoaded(pluginName);
+            => DalamudReflector.TryGetDalamudPlugin(pluginName, out _, false, true);
     }
 
     internal static class VNavmesh
@@ -30,7 +33,6 @@ namespace GatherBuddy.Plugin
                 Debug.Assert(Reload != null);
                 Debug.Assert(Rebuild != null);
                 Debug.Assert(Pathfind != null);
-                Debug.Assert(PathfindWithTolerance != null);
                 Debug.Assert(PathfindCancelable != null);
                 Debug.Assert(PathfindCancelAll != null);
                 Debug.Assert(PathfindInProgress != null);
@@ -53,9 +55,6 @@ namespace GatherBuddy.Plugin
 
             [EzIPC("vnavmesh.Nav.Pathfind", applyPrefix: false)]
             internal static readonly Func<Vector3, Vector3, bool, Task<List<Vector3>>> Pathfind;
-
-            [EzIPC("vnavmesh.Nav.PathfindWithTolerance", applyPrefix: false)]
-            internal static readonly Func<Vector3, Vector3, bool, float, Task<List<Vector3>>> PathfindWithTolerance;
 
             [EzIPC("vnavmesh.Nav.PathfindCancelable", applyPrefix: false)]
             internal static readonly Func<Vector3, Vector3, bool, CancellationToken, Task<List<Vector3>>> PathfindCancelable;
@@ -87,19 +86,11 @@ namespace GatherBuddy.Plugin
                     Debug.Assert(PointOnFloor != null);
                 }
 
-                /// <summary>
-                /// Returns the nearest point on the ground to the given position,
-                /// within the specified horizontal and vertical range (box-shaped).
-                /// </summary>
                 [EzIPC("vnavmesh.Query.Mesh.NearestPoint", applyPrefix: false)]
-                internal static readonly Func<Vector3, float, float, Vector3?> NearestPoint;
+                internal static readonly Func<Vector3, float, float, Vector3> NearestPoint;
 
-                /// <summary>
-                /// Returns the highest point on the mesh within the specified horizontal
-                /// range (box-shaped) that is not above the given position.
-                /// </summary>
                 [EzIPC("vnavmesh.Query.Mesh.PointOnFloor", applyPrefix: false)]
-                internal static readonly Func<Vector3, bool, float, Vector3?> PointOnFloor;
+                internal static readonly Func<Vector3, bool, float, Vector3> PointOnFloor;
             }
         }
 
@@ -112,7 +103,6 @@ namespace GatherBuddy.Plugin
                 Debug.Assert(Stop != null);
                 Debug.Assert(IsRunning != null);
                 Debug.Assert(NumWaypoints != null);
-                Debug.Assert(ListWaypoints != null);
                 Debug.Assert(GetMovementAllowed != null);
                 Debug.Assert(SetMovementAllowed != null);
                 Debug.Assert(GetAlignCamera != null);
@@ -132,9 +122,6 @@ namespace GatherBuddy.Plugin
 
             [EzIPC("vnavmesh.Path.NumWaypoints", applyPrefix: false)]
             internal static readonly Func<int> NumWaypoints;
-
-            [EzIPC("vnavmesh.Path.ListWaypoints", applyPrefix: false)]
-            internal static readonly Func<List<Vector3>> ListWaypoints;
 
             [EzIPC("vnavmesh.Path.GetMovementAllowed", applyPrefix: false)]
             internal static readonly Func<bool> GetMovementAllowed;
@@ -161,15 +148,11 @@ namespace GatherBuddy.Plugin
             {
                 EzIPC.Init(typeof(SimpleMove), "vnavmesh");
                 Debug.Assert(PathfindAndMoveTo != null);
-                Debug.Assert(PathfindAndMoveCloseTo != null);
                 Debug.Assert(PathfindInProgress != null);
             }
 
             [EzIPC("vnavmesh.SimpleMove.PathfindAndMoveTo", applyPrefix: false)]
             internal static readonly Func<Vector3, bool, bool> PathfindAndMoveTo;
-
-            [EzIPC("vnavmesh.SimpleMove.PathfindAndMoveCloseTo", applyPrefix: false)]
-            internal static readonly Func<Vector3, bool, float, bool> PathfindAndMoveCloseTo;
 
             [EzIPC("vnavmesh.SimpleMove.PathfindInProgress", applyPrefix: false)]
             internal static readonly Func<bool> PathfindInProgress;
@@ -209,16 +192,15 @@ namespace GatherBuddy.Plugin
     }
 
     internal static class Lifestream
+    {
+        static Lifestream()
         {
-            static Lifestream()
-            {
-                EzIPC.Init(typeof(Lifestream), "Lifestream");
-                Debug.Assert(ExecuteCommand != null);
-                Debug.Assert(IsBusy != null);
-                Debug.Assert(Abort != null);
-                Debug.Assert(AethernetTeleport != null);
-                Debug.Assert(ChangeCharacter != null);
-            }
+            EzIPC.Init(typeof(Lifestream), "Lifestream");
+            Debug.Assert(ExecuteCommand != null);
+            Debug.Assert(IsBusy != null);
+            Debug.Assert(Abort != null);
+            Debug.Assert(AethernetTeleport != null);
+        }
 
         internal static bool Enabled
             => IPCSubscriber.IsReady("Lifestream");
@@ -234,36 +216,9 @@ namespace GatherBuddy.Plugin
 
         [EzIPC("Lifestream.AethernetTeleport", applyPrefix: false)]
         internal static readonly Func<string, bool> AethernetTeleport;
-
-        [EzIPC("Lifestream.AethernetTeleportToFirmament", applyPrefix: false)]
-        internal static readonly Func<bool>? AethernetTeleportToFirmament;
-
-        [EzIPC("Lifestream.GetActiveAetheryte", applyPrefix: false)]
-        internal static readonly Func<uint>? GetActiveAetheryte;
-
-        [EzIPC("Lifestream.GetActiveCustomAetheryte", applyPrefix: false)]
-        internal static readonly Func<uint>? GetActiveCustomAetheryte;
-
-        [EzIPC("Lifestream.GetActiveResidentialAetheryte", applyPrefix: false)]
-        internal static readonly Func<uint>? GetActiveResidentialAetheryte;
         
         [EzIPC("Lifestream.ChangeCharacter", applyPrefix: false)]
         internal static readonly Func<string, string, int> ChangeCharacter;
-
-        internal static uint ActiveAetheryteId
-            => GetActiveAetheryte?.Invoke() ?? 0;
-
-        internal static uint ActiveCustomAetheryteId
-            => GetActiveCustomAetheryte?.Invoke() ?? 0;
-
-        internal static uint ActiveResidentialAetheryteId
-            => GetActiveResidentialAetheryte?.Invoke() ?? 0;
-
-        internal static bool SupportsFirmamentTeleport
-            => Enabled && AethernetTeleportToFirmament != null;
-
-        internal static bool TryEnterFirmament()
-            => AethernetTeleportToFirmament?.Invoke() ?? false;
     }
 
     internal static class YesAlready
@@ -271,67 +226,48 @@ namespace GatherBuddy.Plugin
         private static bool _locked = false;
         internal static void Lock()
         {
-            if (!_locked && Dalamud.PluginInterface.TryGetData<HashSet<string>>("YesAlready.StopRequests", out var stopRequests))
+            if (!_locked && EzSharedData.TryGet<HashSet<string>>("YesAlready.StopRequests", out var stopRequests))
             {
-                stopRequests.Add(Dalamud.PluginInterface.InternalName);
+                stopRequests.Add(Svc.PluginInterface.InternalName);
                 _locked = true;
             }
         }
         internal static void Unlock()
         {
-            if (_locked && Dalamud.PluginInterface.TryGetData<HashSet<string>>("YesAlready.StopRequests", out var stopRequests))
+            if (_locked && EzSharedData.TryGet<HashSet<string>>("YesAlready.StopRequests", out var stopRequests))
             {
-                stopRequests.Remove(Dalamud.PluginInterface.InternalName);
+                stopRequests.Remove(Svc.PluginInterface.InternalName);
                 _locked = false;
             }
         }
     }
 
     internal static class AllaganTools
+    {
+        static AllaganTools()
         {
-            static AllaganTools()
-            {
-                EzIPC.Init(typeof(AllaganTools), "AllaganTools");
-                Debug.Assert(ItemCountOwned != null);
-                Debug.Assert(GetCharactersOwnedByActive != null);
-                Debug.Assert(IsInitialized != null);
-            }
+            EzIPC.Init(typeof(AllaganTools), "AllaganTools");
+        }
 
-            internal static bool Enabled => IPCSubscriber.IsReady("InventoryTools");
+        internal static bool Enabled => IPCSubscriber.IsReady("InventoryTools");
 
         [EzIPC("AllaganTools.ItemCountOwned", applyPrefix: false)]
         internal static readonly Func<uint, bool, uint[], uint> ItemCountOwned;
-
-        [EzIPC("AllaganTools.ItemCount", applyPrefix: false)]
-        internal static readonly Func<uint, ulong, uint, uint> ItemCount;
-
-        [EzIPC("AllaganTools.ItemCountHQ", applyPrefix: false)]
-        internal static readonly Func<uint, ulong, uint, uint> ItemCountHQ;
-
-        [EzIPC("AllaganTools.GetCharactersOwnedByActive", applyPrefix: false)]
-        internal static readonly Func<bool, HashSet<ulong>> GetCharactersOwnedByActive;
-
-        [EzIPC("AllaganTools.IsInitialized", applyPrefix: false)]
-        internal static readonly Func<bool> IsInitialized;
     }
 
     internal static class AutoHook
+    {
+        static AutoHook()
         {
-            static AutoHook()
-            {
-                EzIPC.Init(typeof(AutoHook), "AutoHook");
-                Debug.Assert(GetPluginState != null);
-                Debug.Assert(GetAutoStartFishing != null);
-                Debug.Assert(SetPluginState != null);
-                Debug.Assert(SetAutoStartFishing != null);
-                Debug.Assert(SetAutoGigState != null);
-                Debug.Assert(CreateAndSelectAnonymousPreset != null);
-                Debug.Assert(ImportAndSelectPreset != null);
-                Debug.Assert(SetPreset != null);
-                Debug.Assert(DeleteSelectedPreset != null);
-            }
+            // SafeWrapper.IPCException: TC AutoHook walk-back (4cf2b71) does not register
+            // SetAutoStartFishing / GetPluginState / GetAutoStartFishing — upstream HEAD
+            // doesn't either. Calling those throws IpcNotReadyError despite `?.Invoke`
+            // (field is a non-null delegate to the channel). The safe wrapper makes ECommons
+            // swallow the exception so autogather toggle / fish-handoff don't break.
+            EzIPC.Init(typeof(AutoHook), "AutoHook", SafeWrapper.IPCException);
+        }
 
-            internal static bool Enabled => IPCSubscriber.IsReady("AutoHook");
+        internal static bool Enabled => IPCSubscriber.IsReady("AutoHook");
 
         [EzIPC("AutoHook.GetPluginState", applyPrefix: false)]
         internal static readonly Func<bool> GetPluginState;
@@ -362,36 +298,26 @@ namespace GatherBuddy.Plugin
     }
 
     internal static class AutoRetainer
+    {
+        public class OfflineRetainerData
         {
-            public class OfflineRetainerData
-            {
-                public string Name { get; set; } = string.Empty;
-                public uint VentureEndsAt { get; set; }
-                public bool HasVenture { get; set; }
-            }
+            public string Name { get; set; } = string.Empty;
+            public uint VentureEndsAt { get; set; }
+            public bool HasVenture { get; set; }
+        }
 
-            public class OfflineCharacterData
-            {
-                public ulong CID { get; set; }
-                public string Name { get; set; } = string.Empty;
-                public string World { get; set; } = string.Empty;
-                public bool Enabled { get; set; }
-                public List<OfflineRetainerData> RetainerData { get; set; } = new();
-            }
+        public class OfflineCharacterData
+        {
+            public ulong CID { get; set; }
+            public string Name { get; set; } = string.Empty;
+            public string World { get; set; } = string.Empty;
+            public bool Enabled { get; set; }
+            public List<OfflineRetainerData> RetainerData { get; set; } = new();
+        }
 
-            private static EzIPCDisposalToken[] _disposalTokens = EzIPC.Init(typeof(AutoRetainer), "AutoRetainer.PluginState", SafeWrapper.IPCException);
+        private static EzIPCDisposalToken[] _disposalTokens = EzIPC.Init(typeof(AutoRetainer), "AutoRetainer.PluginState", SafeWrapper.IPCException);
 
-            static AutoRetainer()
-            {
-                Debug.Assert(IsBusy != null);
-                Debug.Assert(GetEnabledRetainers != null);
-                Debug.Assert(AbortAllTasks != null);
-                Debug.Assert(DisableAllFunctions != null);
-                Debug.Assert(EnableMultiMode != null);
-                Debug.Assert(GetOfflineCharacterData != null);
-            }
-
-            internal static bool IsEnabled => IPCSubscriber.IsReady("AutoRetainer");
+        internal static bool IsEnabled => IPCSubscriber.IsReady("AutoRetainer");
 
         [EzIPC] internal static readonly Func<bool> IsBusy;
         [EzIPC] internal static readonly Func<Dictionary<ulong, HashSet<string>>> GetEnabledRetainers;

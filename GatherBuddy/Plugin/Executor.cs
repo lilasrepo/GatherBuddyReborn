@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
@@ -10,6 +10,7 @@ using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using GatherBuddy.Classes;
 using GatherBuddy.Enums;
+using UmbralNodes = GatherBuddy.Data.UmbralNodes;
 using GatherBuddy.Interfaces;
 using GatherBuddy.SeFunctions;
 using GatherBuddy.Time;
@@ -32,7 +33,7 @@ public class Executor
         Fish,
     }
 
-    private readonly CommandManager _commandManager = new(Dalamud.GameGui, new ProcessChatBox(Dalamud.SigScanner));
+    private readonly CommandManager _commandManager = new(Dalamud.GameGui, Dalamud.SigScanner);
     private readonly MacroManager _macroManager = new();
     private readonly GatherBuddy _plugin;
     public readonly Identificator Identificator = new();
@@ -105,7 +106,7 @@ public class Executor
             _visitedLocations.Clear();
         _keepVisitedLocations = true;
         if (_item == null)
-            Communicator.Print("没有可用的上一次的采集指令。");
+            Communicator.Print("No previous gather command registered.");
     }
 
     private void DoIdentify()
@@ -149,14 +150,25 @@ public class Executor
 
         if (!item.Locations.Any())
         {
+            // Special handling for umbral items - they don't have regular locations
+            if (UmbralNodes.IsUmbralItem(item.ItemId))
+            {
+                var umbralInfo = UmbralNodes.GetUmbralItemInfo(item.ItemId);
+                if (umbralInfo.HasValue)
+                {
+                    Communicator.Print($"Umbral item {item.Name[GatherBuddy.Language]} will be gathered during {umbralInfo.Value.Weather} weather in Diadem.");
+                    return null; // Return null but don't show "no location" error
+                }
+            }
+            
             Communicator.LocationNotFound(item, _gatheringType);
             return null;
         }
 
         _location = null;
-        if (GatherBuddy.Config.PreferredGatheringType != GatheringType.多职业
+        if (GatherBuddy.Config.PreferredGatheringType != GatheringType.Multiple
          && _gatheringType == null
-         && item is Gatherable { GatheringType: GatheringType.多职业 })
+         && item is Gatherable { GatheringType: GatheringType.Multiple })
             _gatheringType = GatherBuddy.Config.PreferredGatheringType;
 
         (_location, _uptime) = (_keepVisitedLocations, _gatheringType) switch
@@ -181,10 +193,10 @@ public class Executor
 
         if (GatherBuddy.Config.SkipTeleportIfClose
          && Dalamud.ClientState.TerritoryType == _location.Territory.Id
-         && Dalamud.Objects.LocalPlayer is {} player)
+         && Dalamud.ClientState.LocalPlayer != null)
         {
             // Check distance of player to node against distance of aetheryte to node.
-            var playerPos = player.Position;
+            var playerPos = Dalamud.ClientState.LocalPlayer.Position;
             var aetheryte = _location.ClosestAetheryte;
             var posX = Maps.NodeToMap(playerPos.X, _location.Territory.SizeFactor);
             var posY = Maps.NodeToMap(playerPos.Z, _location.Territory.SizeFactor);
@@ -208,21 +220,21 @@ public class Executor
 
         var set = _location.GatheringType.ToGroup() switch
         {
-            GatheringType.捕鱼人 => GatherBuddy.Config.FisherSetName,
-            GatheringType.园艺工 => GatherBuddy.Config.BotanistSetName,
-            GatheringType.采矿工 => GatherBuddy.Config.MinerSetName,
+            GatheringType.Fisher => GatherBuddy.Config.FisherSetName,
+            GatheringType.Botanist => GatherBuddy.Config.BotanistSetName,
+            GatheringType.Miner => GatherBuddy.Config.MinerSetName,
             _ => null,
         };
         if (set == null)
         {
-            Communicator.PrintError("此位置没有关联任何职业: ", _location.Name, GatherBuddy.Config.SeColorArguments, ".");
+            Communicator.PrintError("No job type associated with location ", _location.Name, GatherBuddy.Config.SeColorArguments, ".");
             return;
         }
 
         if (set.Length == 0)
         {
-            Communicator.PrintError("未设置任何套装: ", _location.GatheringType.ToString(), GatherBuddy.Config.SeColorArguments,
-                "");
+            Communicator.PrintError("No gear set for ", _location.GatheringType.ToString(), GatherBuddy.Config.SeColorArguments,
+                " configured.");
             return;
         }
 
@@ -306,20 +318,21 @@ public class Executor
             return;
         }
 
-        Dalamud.ClientState.TerritoryChanged += DoWaymarkOnArrival;
-        return;
+        var time = DateTime.UtcNow.AddSeconds(30);
 
-        void DoWaymarkOnArrival(uint t)
+        void DoWaymarkOnArrival(ushort t)
         {
             if (territory == t)
                 GatherBuddy.WaymarkManager.SetWaymarks(markers);
             Dalamud.ClientState.TerritoryChanged -= DoWaymarkOnArrival;
         }
+
+        Dalamud.ClientState.TerritoryChanged += DoWaymarkOnArrival;
     }
 
     public bool DoCommand(string argument)
     {
-        if (Dalamud.Objects.LocalPlayer is null || Dalamud.Conditions[ConditionFlag.BetweenAreas])
+        if (Dalamud.ClientState.LocalPlayer == null || Dalamud.Conditions[ConditionFlag.BetweenAreas])
             return true;
 
         switch (argument)
@@ -346,15 +359,15 @@ public class Executor
                 return true;
             case GatherBuddy.AutoCommand:
                 GatherBuddy.AutoGather.Enabled = !GatherBuddy.AutoGather.Enabled;
-                Communicator.Print(GatherBuddy.AutoGather.Enabled ? "启用自动采集" : "禁用自动采集");
+                Communicator.Print(GatherBuddy.AutoGather.Enabled ? "Auto-gathering enabled." : "Auto-gathering disabled.");
                 return true;
             case GatherBuddy.AutoOnCommand:
                 GatherBuddy.AutoGather.Enabled = true;
-                Communicator.Print("启用自动采集");
+                Communicator.Print("Auto-gathering enabled.");
                 return true;
             case GatherBuddy.AutoOffCommand:
                 GatherBuddy.AutoGather.Enabled = false;
-                Communicator.Print("禁用自动采集");
+                Communicator.Print("Auto-gathering disabled.");
                 return true;
             default: return false;
         }
@@ -432,14 +445,14 @@ public class Executor
     {
         if (territory.Aetherytes.Count == 0)
         {
-            Communicator.PrintError(string.Empty, territory.Name, GatherBuddy.Config.SeColorArguments, " 没有可传送的以太之光。");
+            Communicator.PrintError(string.Empty, territory.Name, GatherBuddy.Config.SeColorArguments, " has no valid aetheryte.");
             return;
         }
 
         var aetheryte = territory.Aetherytes.FirstOrDefault(a => Teleporter.IsAttuned(a.Id));
         if (aetheryte == null)
         {
-            Communicator.PrintError("没有与此区域的任何以太之光进行共鸣: ", territory.Name, GatherBuddy.Config.SeColorArguments, ".");
+            Communicator.PrintError("Not attuned to any aetheryte in ", territory.Name, GatherBuddy.Config.SeColorArguments, ".");
             return;
         }
 

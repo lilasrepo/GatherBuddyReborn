@@ -28,6 +28,7 @@ public class BiteTimerService
                 return;
             }
 
+            GatherBuddy.Log.Debug($"[BiteTimerService] Loading bite timers from: {biteTimersPath}");
 
             var json = File.ReadAllText(biteTimersPath);
             var biteTimersArray = JsonSerializer.Deserialize<List<BiteTimerData>>(json);
@@ -44,6 +45,7 @@ public class BiteTimerService
             }
 
             _isLoaded = true;
+            GatherBuddy.Log.Information($"[BiteTimerService] Loaded {_biteTimers.Count} bite timers from AutoHook");
         }
         catch (Exception ex)
         {

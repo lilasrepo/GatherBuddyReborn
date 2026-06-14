@@ -1,10 +1,10 @@
 using System.Collections.Generic;
 using System.Linq;
-using GatherBuddy.Helpers;
+using ECommons.DalamudServices;
+using ECommons.GameHelpers;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using GatherBuddy.Interfaces;
 using GatherBuddy.Plugin;
-using System.Collections.Immutable;
 
 namespace GatherBuddy.AutoGather.Extensions;
 
@@ -13,7 +13,7 @@ namespace GatherBuddy.AutoGather.Extensions;
 /// </summary>
 public static class GatherableExtensions
 {
-    private static readonly ImmutableArray<InventoryType> _inventoryTypes =
+    private static IReadOnlyList<InventoryType> _inventoryTypes { get; } =
         [
             InventoryType.RetainerCrystals,
             InventoryType.RetainerPage1,
@@ -29,7 +29,6 @@ public static class GatherableExtensions
             InventoryType.Inventory4,
             InventoryType.Crystals
         ];
-    private static readonly uint[] _inventoryTypesArray = [.. _inventoryTypes.Cast<uint>()];
 
     /// <summary>
     /// Gets the inventory count for a gatherable item.
@@ -37,24 +36,14 @@ public static class GatherableExtensions
     /// <param name="gatherable">The gatherable item to check.</param>
     /// <param name="checkRetainers">Check retainer inventory.</param>
     /// <returns>The count of the item in the inventory.</returns>
-    public static unsafe int GetInventoryCount(this IGatherable gatherable)
-    {
-        var inventory = InventoryManager.Instance();
-        var count = inventory->GetInventoryItemCount(gatherable.ItemId, false, false, false, 0);
-
-        if (gatherable.ItemData.IsCollectable)
-            count += inventory->GetInventoryItemCount(gatherable.ItemId, false, false, false, 1);
-
-        return count;
-    }
-
-    public static int GetTotalCount(this IGatherable gatherable)
+    public unsafe static int GetInventoryCount(this IGatherable gatherable)
     {
         if (GatherBuddy.Config.AutoGatherConfig.CheckRetainers && AllaganTools.Enabled)
         {
-            return (int)AllaganTools.ItemCountOwned(gatherable.ItemId, true, _inventoryTypesArray);
+            return (int)AllaganTools.ItemCountOwned(gatherable.ItemId, true, _inventoryTypes.Select(it => (uint)it).ToArray());
         }
 
-        return gatherable.GetInventoryCount();
+        var inventory = InventoryManager.Instance();
+        return inventory->GetInventoryItemCount(gatherable.ItemId, false, false, false, (short)(gatherable.ItemData.IsCollectable ? 1 : 0));
     }
 }

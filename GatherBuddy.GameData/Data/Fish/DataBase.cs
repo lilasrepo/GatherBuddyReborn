@@ -1,9 +1,13 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using GatherBuddy.Enums;
 using GatherBuddy.Structs;
 using GatherBuddy.Time;
 using Newtonsoft.Json;
-using ElliLib.Extensions;
+using OtterGui.Extensions;
 
 namespace GatherBuddy.Data;
 
@@ -17,7 +21,8 @@ public static partial class Fish
             return fish;
         }
 
-        data.Log.Error($"找不到鱼类 {id}");
+        // C-fix: API12 Lumina (game 7.1) lacks 7.2+ fish IDs (Cosmic Exploration, etc) — drop to Verbose so it doesn't spam log
+        data.Log.Verbose($"Could not find fish {id}.");
         return null;
     }
 
@@ -30,13 +35,14 @@ public static partial class Fish
         {
             fish!.PreviousWeather = previousWeathers.Select(w => data.Weathers.TryGetValue(w, out var weather)
                     ? weather
-                    : throw new Exception($"找不到天气 {w}."))
+                    : throw new Exception($"Could not find weather {w}."))
                 .ToArray();
             fish.FishRestrictions |= FishRestrictions.Weather;
         }
         catch (Exception e)
         {
-            data.Log.Error(e.Message);
+            // C-fix: catches "Could not find weather/bait/fish" — 7.2+ era IDs not in TC 7.1 Lumina; demote to Verbose
+            data.Log.Verbose(e.Message);
         }
 
         return fish;
@@ -51,13 +57,14 @@ public static partial class Fish
         {
             fish!.CurrentWeather = weathers.Select(w => data.Weathers.TryGetValue(w, out var weather)
                     ? weather
-                    : throw new Exception($"找不到天气 {w}."))
+                    : throw new Exception($"Could not find weather {w}."))
                 .ToArray();
             fish.FishRestrictions |= FishRestrictions.Weather;
         }
         catch (Exception e)
         {
-            data.Log.Error(e.Message);
+            // C-fix: catches "Could not find weather/bait/fish" — 7.2+ era IDs not in TC 7.1 Lumina; demote to Verbose
+            data.Log.Verbose(e.Message);
         }
 
         return fish;
@@ -73,7 +80,7 @@ public static partial class Fish
 
         if (fish.IsSpearFish)
         {
-            data.Log.Error("尝试为刺鱼设置钓饵");
+            data.Log.Error("Tried to set bait for spearfish.");
             return fish;
         }
 
@@ -87,11 +94,12 @@ public static partial class Fish
                     fsh,
                 ];
             else
-                throw new Exception($"找不到钓饵 {baitId.Value}.");
+                throw new Exception($"Could not find bait {baitId.Value}.");
         }
         catch (Exception e)
         {
-            data.Log.Error(e.Message);
+            // C-fix: 7.2+ era bait IDs not in TC 7.1 Lumina — Verbose, not Error (only realistic throw is the bait-not-found case)
+            data.Log.Verbose(e.Message);
         }
 
         return fish;
@@ -113,7 +121,7 @@ public static partial class Fish
 
         if (fish.IsSpearFish)
         {
-            data.Log.Error("尝试为刺鱼设置钓饵");
+            data.Log.Error("Tried to set bait for spearfish.");
             return fish;
         }
 
@@ -125,11 +133,12 @@ public static partial class Fish
                     fsh,
                 ];
             else
-                throw new Exception($"找不到以小钓大的鱼类 {moochId}.");
+                throw new Exception($"Could not find fish {moochId}.");
         }
         catch (Exception e)
         {
-            data.Log.Error(e.Message);
+            // C-fix: catches "Could not find weather/bait/fish" — 7.2+ era IDs not in TC 7.1 Lumina; demote to Verbose
+            data.Log.Verbose(e.Message);
         }
 
         return fish;
@@ -142,21 +151,22 @@ public static partial class Fish
 
         if (fish.IsSpearFish)
         {
-            data.Log.Error("尝试为刺鱼设置钓饵");
+            data.Log.Error("Tried to set bait for spearfish.");
             return fish;
         }
 
         try
         {
-            fish.InitialBait = data.Bait.TryGetValue(baitId, out var bait) ? bait : throw new Exception($"找不到钓饵 {baitId}.");
+            fish.InitialBait = data.Bait.TryGetValue(baitId, out var bait) ? bait : throw new Exception($"Could not find bait {baitId}.");
             fish.Mooches = items.Prepend(mooch1).Select(f => data.Fishes.TryGetValue(f, out var fsh)
                     ? fsh
-                    : throw new Exception($"找不到鱼类 {f}."))
+                    : throw new Exception($"Could not find fish {f}."))
                 .ToArray();
         }
         catch (Exception e)
         {
-            data.Log.Error(e.Message);
+            // C-fix: catches "Could not find weather/bait/fish" — 7.2+ era IDs not in TC 7.1 Lumina; demote to Verbose
+            data.Log.Verbose(e.Message);
         }
 
         return fish;
@@ -176,12 +186,13 @@ public static partial class Fish
             fish.Predators = predators.Where(p => p.Item2 > 0)
                 .Select(p => data.Fishes.TryGetValue(p.Item1, out var fsh)
                     ? (fsh, p.Item2)
-                    : throw new Exception($"找不到鱼类 {p.Item1}."))
+                    : throw new Exception($"Could not find fish {p.Item1}."))
                 .ToArray();
         }
         catch (Exception e)
         {
-            data.Log.Error(e.Message);
+            // C-fix: catches "Could not find weather/bait/fish" — 7.2+ era IDs not in TC 7.1 Lumina; demote to Verbose
+            data.Log.Verbose(e.Message);
         }
 
         return fish;
@@ -204,7 +215,7 @@ public static partial class Fish
 
         if (fish.IsSpearFish)
         {
-            data.Log.Error("尝试为刺鱼设置钓组");
+            data.Log.Error("Tried to set snagging for spearfish.");
             return fish;
         }
 
@@ -212,19 +223,19 @@ public static partial class Fish
         return fish;
     }
 
-    private static Classes.Fish? Bite(this Classes.Fish? fish, GameData data, HookSet hookSet, BiteType biteType = BiteType.未知)
+    private static Classes.Fish? Bite(this Classes.Fish? fish, GameData data, HookSet hookSet, BiteType biteType = BiteType.Unknown)
     {
         if (fish == null)
             return null;
 
         if (fish.IsSpearFish)
         {
-            data.Log.Error("尝试为刺鱼设置咬钩类型");
+            data.Log.Error("Tried to set bite for spearfish.");
             return fish;
         }
 
         fish.HookSet  = hookSet == HookSet.Unknown ? fish.HookSet : hookSet;
-        fish.BiteType = biteType == BiteType.未知 ? fish.BiteType : biteType;
+        fish.BiteType = biteType == BiteType.Unknown ? fish.BiteType : biteType;
         return fish;
     }
 
@@ -236,7 +247,7 @@ public static partial class Fish
 
         if (!fish.IsSpearFish)
         {
-            data.Log.Error("尝试为普通鱼类设置刺鱼数据");
+            data.Log.Error("Tried to set spearfish data for regular fish.");
             return fish;
         }
 
@@ -272,7 +283,7 @@ public static partial class Fish
 
         fish.SurfaceSlap = data.Fishes.TryGetValue(fishId, out var fsh)
             ? fsh
-            : throw new Exception($"找不到鱼类 {fishId}.");
+            : throw new Exception($"Could not find fish {fishId}.");
         return fish;
     }
 
@@ -321,7 +332,7 @@ public static partial class Fish
 
         fish.CosmicMission = data.CosmicFishingMissions.TryGetValue(value, out var mission)
             ? mission
-            : throw new Exception($"找不到太空钓鱼任务 {value}.");
+            : throw new Exception($"Could not find cosmic fishing mission {value}.");
         return fish;
     }
 
@@ -330,18 +341,9 @@ public static partial class Fish
         if (fish == null)
             return null;
 
-        fish.OceanTime = times.Aggregate(OceanTime.永不, (a, b) => a | b);
-        if (fish.OceanTime != OceanTime.总是)
+        fish.OceanTime = times.Aggregate(OceanTime.Never, (a, b) => a | b);
+        if (fish.OceanTime != OceanTime.Always)
             fish.FishRestrictions |= FishRestrictions.Time;
-        return fish;
-    }
-
-    private static Classes.Fish? OceanType(this Classes.Fish? fish, OceanSpecies value)
-    {
-        if (fish == null)
-            return null;
-        
-        fish.OceanSpecies = value;
         return fish;
     }
 
@@ -404,11 +406,9 @@ public static partial class Fish
         data.ApplyCrossroads();
         data.ApplySeekersOfEternity();
         data.ApplyThePromiseOfTomorrow();
-        data.ApplyIntoTheMist();
-        data.ApplyTrailToTheHeavens();
         data.ApplyMooches();
         data.ApplyOverrides();
-        //DumpUnknown(Enum.GetValues<Patch>()[^1], data.Fishes.Values);
+        //DumpUnknown(Patch.SeekersOfEternity, data.Fishes.Values);
     }
 
     public static bool ApplyOverrides(this GameData data)
@@ -430,7 +430,7 @@ public static partial class Fish
                 {
                     if (!data.Fishes.TryGetValue(custom.ItemId, out var fish))
                     {
-                        data.Log.Warning($"无法识别 ItemID 为 {custom.ItemId} 的鱼类，位于索引 {index}");
+                        data.Log.Warning($"Could not identify fish with ItemID {custom.ItemId} at index {index}.");
                         continue;
                     }
 
@@ -443,8 +443,8 @@ public static partial class Fish
                         fish.Mooch(data, mooch);
 
                     if (custom.HookSet is not HookSet.Unknown)
-                        fish.Bite(data, custom.HookSet, custom.BiteType is not BiteType.未知 ? custom.BiteType : fish.BiteType);
-                    else if (custom.BiteType is not BiteType.未知)
+                        fish.Bite(data, custom.HookSet, custom.BiteType is not BiteType.Unknown ? custom.BiteType : fish.BiteType);
+                    else if (custom.BiteType is not BiteType.Unknown)
                         fish.Bite(data, fish.HookSet, custom.BiteType);
 
                     if (custom.Lure is { } lure)
@@ -488,16 +488,16 @@ public static partial class Fish
                 }
                 catch (Exception e)
                 {
-                    data.Log.Warning($"应用鱼类覆盖数据时出错，位于索引 {index}:\n{e}");
+                    data.Log.Warning($"Error applying fish override data at index {index}:\n{e}");
                 }
             }
 
-            data.Log.Information($"已成功应用 {count} 条鱼类覆盖数据");
+            data.Log.Information($"Successfully applied {count} fish data overrides.");
             return count > 0;
         }
         catch (Exception ex)
         {
-            data.Log.Error($"读取鱼类覆盖文件时出错:\n{ex}");
+            data.Log.Error($"Error reading fish override file:\n{ex}");
             return false;
         }
     }

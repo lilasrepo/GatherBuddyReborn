@@ -15,7 +15,6 @@ public enum ItemFilter
     Ephemeral = 0x000020,
     Unspoiled = 0x000040,
     Legendary = 0x000080,
-    Clouded   = 0x100000,
 
     ARealmReborn   = 0x000100,
     Heavensward    = 0x000200,
@@ -26,10 +25,6 @@ public enum ItemFilter
 
     Available    = 0x010000,
     Unavailable  = 0x020000,
-    AlreadyGathered = 0x040000,
-    Ungathered      = 0x080000,
-    UnknownLogState = 0x200000,
-    Leveling        = 0x400000,
 
-    All = 0x7F3FFF,
+    All = 0x033FFF,
 }

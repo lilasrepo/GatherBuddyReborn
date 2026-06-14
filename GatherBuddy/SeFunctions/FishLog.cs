@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using Dalamud.Game;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using GatherBuddy.Classes;
@@ -23,14 +24,14 @@ public unsafe class FishLog
 
     public event Action? Change;
 
-    public FishLog(ISigScannerWrapper sigScanner, IDataManager gameData)
+    public FishLog(ISigScanner sigScanner, IDataManager gameData)
     {
         _numFish      = (uint) gameData.GetExcelSheet<FishParameter>().Count;
         _numSpearFish = (uint) gameData.GetExcelSheet<SpearfishingItem>().Count;
 
         ;
-        _fish      = PlayerState.Instance()->CaughtFishBitArray.Pointer;
-        _spearFish = PlayerState.Instance()->CaughtSpearfishBitArray.Pointer;
+        _fish      = (byte*)Unsafe.AsPointer(ref PlayerState.Instance()->CaughtFishBitmask[0]);
+        _spearFish = (byte*)Unsafe.AsPointer(ref PlayerState.Instance()->CaughtSpearfishBitmask[0]);
 
         _fishStore      = new byte[(_numFish + 7) / 8];
         _spearFishStore = new byte[(_numSpearFish + 7) / 8];

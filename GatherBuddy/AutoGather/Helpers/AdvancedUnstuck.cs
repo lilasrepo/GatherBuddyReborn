@@ -1,14 +1,20 @@
 using Dalamud.Plugin.Services;
-using GatherBuddy.Helpers;
+using ECommons.GameHelpers;
+using ECommons.MathHelpers;
 using GatherBuddy.CustomInfo;
 using System;
 using System.Numerics;
 using Dalamud.Game.ClientState.Conditions;
-using GatherBuddy.Utilities;
 using GatherBuddy.Plugin;
 
 namespace GatherBuddy.AutoGather.Movement
 {
+    public enum AdvancedUnstuckCheckResult
+    {
+        Pass,
+        Wait,
+        Fail
+    }
     public sealed class AdvancedUnstuck : IDisposable
     {
         private const double UnstuckDuration = 1.0;
@@ -19,24 +25,25 @@ namespace GatherBuddy.AutoGather.Movement
         private DateTime _lastMovement;
         private DateTime _unstuckStart;
         private DateTime _lastCheck;
-        private DateTime _lastJumpAttempt;
         private Vector3 _lastPosition;
+        private bool _lastWasFailure;
 
         public bool IsRunning => _movementController.Enabled;
 
-        public bool Check(Vector3 destination, bool isPathing)
+        public AdvancedUnstuckCheckResult Check(Vector3 destination, bool isPathGenerating, bool isPathing)
         {
             if (IsRunning)
-                return false;
+                return AdvancedUnstuckCheckResult.Fail;
 
             var now = DateTime.Now;
 
-            //On cooldown or not navigating: disable tracking and reset
+            //On cooldown, not navigating or near the destination: disable tracking and reset
             if (now.Subtract(_unstuckStart).TotalSeconds < GatherBuddy.Config.AutoGatherConfig.NavResetCooldown
-                || destination == default)
+                || destination == default
+                || Vector2.Distance(destination.ToVector2(), Player.Position.ToVector2()) < 3.5)
             {
                 _lastCheck = DateTime.MinValue;
-                return true;
+                return AdvancedUnstuckCheckResult.Pass;
             }
 
             var lastCheck = _lastCheck;
@@ -47,53 +54,49 @@ namespace GatherBuddy.AutoGather.Movement
             {
                 _lastPosition = Player.Position;
                 _lastMovement = now;
-                return true;
+                _lastWasFailure = false;
+                return AdvancedUnstuckCheckResult.Pass;
             }
 
+            //vnavmesh is generating path: update current position
+            if (isPathGenerating)
+            {
+                _lastPosition = Player.Position;
+                _lastMovement = now;
+            }
             //vnavmesh is moving...
-            if (isPathing)
+            else if (isPathing)
             {
                 //...and quite fast: update current position
                 if (_lastPosition.DistanceToPlayer() >= MinMovementDistance)
                 {
-                    _lastPosition = Player.Position;
+                    _lastPosition = Player.Object.Position;
                     _lastMovement = now;
                 }
                 //...but not fast enough: unstuck
                 else if (now.Subtract(_lastMovement).TotalSeconds > GatherBuddy.Config.AutoGatherConfig.NavResetThreshold)
                 {
-                    GatherBuddy.Log.Warning($"高级脱困: 角色卡住了。在 {now.Subtract(_lastMovement).TotalSeconds} 秒内移动了 {_lastPosition.DistanceToPlayer()} yal");
-                    
-                    // Try jumping first if not flying/diving and haven't tried jumping recently
-                    if (now.Subtract(_lastJumpAttempt).TotalSeconds > GatherBuddy.Config.AutoGatherConfig.NavResetCooldown * 2.0 && IsJumpPossible())
-                    {
-                        _lastMovement = _lastJumpAttempt = now;
-                        _lastPosition = Player.Position;
-
-                        Jump();
-                    }
-                    else
-                    {
-                        // Either flying/diving, or jump didn't work - use normal unstuck
-                        Start();
-                    }
+                    GatherBuddy.Log.Warning($"Advanced Unstuck: the character is stuck. Moved {_lastPosition.DistanceToPlayer()} yalms in {now.Subtract(_lastMovement).TotalSeconds} seconds.");
+                    Start();
                 }
-            } 
-            else
-            {
-                //vnavmesh is generating path: update current position.
-                //Not checking IsPathGenerating because pathfinding may complete asynchronously, and this is handled by HandlePathfinding()
-                _lastPosition = Player.Position;
-                _lastMovement = now;
             }
-            return !IsRunning;
+            //Not generating path and not moving for 2 consecutive framework updates: unstuck
+            else if (_lastWasFailure)
+            {
+                GatherBuddy.Log.Warning($"Advanced Unstuck: vnavmesh failure detected.");
+                Start();
+            }
+
+            //Not generating path and not moving: remember that fact and exit main loop
+            _lastWasFailure = !isPathGenerating && !isPathing;
+            return IsRunning ? AdvancedUnstuckCheckResult.Fail : _lastWasFailure ? AdvancedUnstuckCheckResult.Wait : AdvancedUnstuckCheckResult.Pass;
         }
 
         public void Force()
         {
             if (!IsRunning)
             {
-                GatherBuddy.Log.Warning("高级脱困: 强制启动");
+                GatherBuddy.Log.Warning("Advanced Unstuck: force start.");
                 Start();
             }
         }
@@ -102,31 +105,9 @@ namespace GatherBuddy.AutoGather.Movement
         {
             if (!IsRunning)
             {
-                GatherBuddy.Log.Warning("高级脱困: 为钓鱼强制启动（寻找可降落位置）");
+                GatherBuddy.Log.Warning("Advanced Unstuck: force start for fishing (finding landable spot).");
                 StartFishing();
             }
-        }
-
-        private unsafe bool IsJumpPossible()
-        {
-            if (Dalamud.Conditions[ConditionFlag.InFlight] || Dalamud.Conditions[ConditionFlag.Diving] || Dalamud.Conditions[ConditionFlag.Jumping])
-                return false;
-
-            var amInstance = FFXIVClientStructs.FFXIV.Client.Game.ActionManager.Instance();
-            if (amInstance == null)
-                return false;
-
-            var actionStatus = amInstance->GetActionStatus(FFXIVClientStructs.FFXIV.Client.Game.ActionType.GeneralAction, 2);
-            return actionStatus == 0;
-        }
-
-        private unsafe void Jump()
-        {
-                GatherBuddy.Log.Debug($"高级脱困: 尝试跳跃");
-
-            var amInstance = FFXIVClientStructs.FFXIV.Client.Game.ActionManager.Instance();
-
-            amInstance->UseAction(FFXIVClientStructs.FFXIV.Client.Game.ActionType.GeneralAction, 2);
         }
 
         private void Start()
@@ -144,7 +125,7 @@ namespace GatherBuddy.AutoGather.Movement
         {
             if (!VNavmesh.Enabled || VNavmesh.Query.Mesh.PointOnFloor == null)
             {
-                GatherBuddy.Log.Error("vNavmesh 网格查询不可用，无法安全为钓鱼脱困");
+                GatherBuddy.Log.Error("vNavmesh mesh query not available, cannot unstuck for fishing safely");
                 return;
             }
 
@@ -168,22 +149,22 @@ namespace GatherBuddy.AutoGather.Movement
                     {
                         var floorPosition = VNavmesh.Query.Mesh.PointOnFloor.Invoke(testPosition, true, 50f);
                         
-                        if (floorPosition.HasValue && floorPosition.Value != default)
+                        if (floorPosition != default)
                         {
-                            var distanceToFloor = Vector3.Distance(floorPosition.Value, Player.Position);
-                            var heightDiff = Math.Abs(floorPosition.Value.Y - testPosition.Y);
+                            var distanceToFloor = Vector3.Distance(floorPosition, Player.Position);
+                            var heightDiff = Math.Abs(floorPosition.Y - testPosition.Y);
                             
                             if (distanceToFloor > 10f && heightDiff < 30f)
                             {
-                                landablePosition = floorPosition.Value;
-                                GatherBuddy.Log.Information($"[钓鱼脱困] 找到可降落位置，距离 {distanceToFloor:F1}y（高度差: {heightDiff:F1}y）");
+                                landablePosition = floorPosition;
+                                GatherBuddy.Log.Information($"[Fishing Unstuck] Found landable position at {distanceToFloor:F1}y away (height diff: {heightDiff:F1}y)");
                                 break;
                             }
                         }
                     }
                     catch (Exception ex)
                     {
-                        GatherBuddy.Log.Debug($"查询网格时出错，距离 {distance}，角度 {angleStep}: {ex.Message}");
+                        GatherBuddy.Log.Debug($"Error querying mesh at distance {distance}, angle {angleStep}: {ex.Message}");
                     }
                 }
                 
@@ -193,7 +174,7 @@ namespace GatherBuddy.AutoGather.Movement
             
             if (landablePosition == default)
             {
-                GatherBuddy.Log.Error("[钓鱼脱困] 严重: 在 60y 范围内找不到任何可降落位置。需要手动干预");
+                GatherBuddy.Log.Error("[Fishing Unstuck] CRITICAL: Could not find any landable position within 60y. Manual intervention required.");
                 return;
             }
             

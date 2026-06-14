@@ -5,14 +5,14 @@ using GatherBuddy.Config;
 using GatherBuddy.Enums;
 using GatherBuddy.Interfaces;
 using GatherBuddy.Time;
-using ElliLib.Extensions;
-using ElliLib.Text;
+using OtterGui.Extensions;
+using OtterGui.Text;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Numerics;
-using Dalamud.Bindings.ImGui;
-using ImRaii = ElliLib.Raii.ImRaii;
+using ImGuiNET;
+using ImRaii = OtterGui.Raii.ImRaii;
 
 namespace GatherBuddy.Gui;
 
@@ -47,9 +47,9 @@ public partial class Interface
             public static (string, uint) FromBiteType(BiteType bite)
                 => bite switch
                 {
-                    BiteType.轻竿      => Weak,
-                    BiteType.普通竿    => Strong,
-                    BiteType.鱼王竿 => Legendary,
+                    BiteType.Weak      => Weak,
+                    BiteType.Strong    => Strong,
+                    BiteType.Legendary => Legendary,
                     _                  => Unknown,
                 };
         }
@@ -80,9 +80,6 @@ public partial class Interface
 
         public byte MultiHookLower
             => Data.MultiHookLower;
-        
-        public OceanSpecies OceanSpecies
-            => Data.OceanSpecies;
 
         public byte MutliHookUpper
             => Data.MultiHookUpper;
@@ -151,7 +148,7 @@ public partial class Interface
                 [
                     new BaitOrder
                     {
-                        Name    = string.Intern($"{fish.Size.ToName()} + {fish.Speed.ToName()}"), // 不知道用啥连接, 暂且用 +
+                        Name    = string.Intern($"{fish.Size.ToName()} and {fish.Speed.ToName()}"),
                         Fish    = null,
                         Icon    = Icons.FromSize(fish.Size),
                         Bite    = Bites.Unknown,
@@ -257,9 +254,9 @@ public partial class Interface
             var minutes = intuition / RealTime.SecondsPerMinute;
             var seconds = intuition % RealTime.SecondsPerMinute;
             if (seconds == 0)
-                return minutes == 1 ? "鱼识持续 1 分钟" : string.Intern($"鱼识持续 {minutes} 分钟");
+                return minutes == 1 ? "Intuition for 1 Minute" : string.Intern($"Intuition for {minutes} Minutes");
 
-            return string.Intern($"鱼识持续 {minutes}:{seconds:D2}");
+            return string.Intern($"Intuition for {minutes}:{seconds:D2} Minutes");
         }
 
         public ExtendedFish(Fish data)
@@ -281,17 +278,17 @@ public partial class Interface
                 Data.FishingSpots.Where(f => f.ClosestAetheryte != null).Select(f => f.ClosestAetheryte!.Name).Distinct());
             if (!Aetherytes.Contains('\n'))
                 Aetherytes = '\0' + Aetherytes;
-            Patch = string.Intern($"版本 {Data.Patch.ToVersionString()}");
-            FishType = Data.OceanFish ? "海钓" :
-                Data.IsSpearFish      ? "刺鱼" :
-                Data.IsBigFish        ? "鱼王" : "常规";
+            Patch = string.Intern($"Patch {Data.Patch.ToVersionString()}");
+            FishType = Data.OceanFish ? "Ocean Fish" :
+                Data.IsSpearFish      ? "Spearfishing" :
+                Data.IsBigFish        ? "Big Fish" : "Regular Fish";
 
             Time = !Data.FishRestrictions.HasFlag(FishRestrictions.Time)
-                ? "总是出现"
+                ? "Always Up"
                 : Data.OceanFish
                     ? PrintOceanTime(Data.OceanTime)
                     : Data.Interval.AlwaysUp()
-                        ? "未知窗口期"
+                        ? "Unknown Uptime"
                         : string.Intern(Data.Interval.PrintHours());
 
             UptimePercent = SetUptime(Data);
@@ -313,13 +310,13 @@ public partial class Interface
         {
             return time switch
             {
-                OceanTime.日落                   => "日落",
-                OceanTime.日落 | OceanTime.夜晚 => "日落 / 夜晚",
-                OceanTime.日落 | OceanTime.白昼   => "日落 / 白昼",
-                OceanTime.夜晚                    => "夜晚",
-                OceanTime.夜晚 | OceanTime.白昼    => "白昼 / 夜晚",
-                OceanTime.白昼                      => "白昼",
-                _                                  => "未知",
+                OceanTime.Sunset                   => "Sunset",
+                OceanTime.Sunset | OceanTime.Night => "Sunset or Night",
+                OceanTime.Sunset | OceanTime.Day   => "Sunset or Day",
+                OceanTime.Night                    => "Night",
+                OceanTime.Night | OceanTime.Day    => "Day or Night",
+                OceanTime.Day                      => "Day",
+                _                                  => "Unknown Uptime",
             };
         }
 
@@ -333,26 +330,26 @@ public partial class Interface
         {
             if (!fish.Data.FishRestrictions.HasFlag(FishRestrictions.Weather))
             {
-                ImUtf8.TextFramed("无天气限制"u8, ColorId.HeaderWeather.Value());
+                ImUtf8.TextFramed("No Weather Restrictions"u8, ColorId.HeaderWeather.Value());
                 return;
             }
 
             if (fish.WeatherIcons.Length == 0 && fish.TransitionIcons.Length == 0)
             {
-                ImUtf8.TextFramed("未知天气限制"u8, ColorId.HeaderWeather.Value());
+                ImUtf8.TextFramed("Unknown Weather Restrictions"u8, ColorId.HeaderWeather.Value());
                 return;
             }
 
             using var style = ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, ImGui.GetStyle().ItemSpacing / 2);
             if (fish.TransitionIcons.Length > 0)
             {
-                AlignTextToSize(fish.TransitionIcons.Length > 1 ? "要求其中之一" : "要求", weatherIconSize);
+                AlignTextToSize(fish.TransitionIcons.Length > 1 ? "Requires one of" : "Requires", weatherIconSize);
                 style.Push(ImGuiStyleVar.ItemSpacing, Vector2.One * ImGuiHelpers.GlobalScale);
                 foreach (var w in fish.TransitionIcons)
                 {
                     ImGui.SameLine();
                     if (w.TryGetWrap(out var wrap, out _))
-                        ImGui.Image(wrap.Handle, weatherIconSize);
+                        ImGui.Image(wrap.ImGuiHandle, weatherIconSize);
                     else
                         ImGui.Dummy(weatherIconSize);
                 }
@@ -360,11 +357,11 @@ public partial class Interface
                 style.Pop();
 
                 ImGui.SameLine();
-                AlignTextToSize(fish.WeatherIcons.Length > 1 ? "后续天气可能" : "后续天气", weatherIconSize);
+                AlignTextToSize(fish.WeatherIcons.Length > 1 ? "followed by one of" : "followed by", weatherIconSize);
                 if (fish.WeatherIcons.Length == 0)
                 {
                     ImGui.SameLine();
-                    AlignTextToSize(" 任意", weatherIconSize);
+                    AlignTextToSize(" Anything", weatherIconSize);
                 }
                 else
                 {
@@ -373,7 +370,7 @@ public partial class Interface
                     {
                         ImGui.SameLine();
                         if (w.TryGetWrap(out var wrap, out _))
-                            ImGui.Image(wrap.Handle, weatherIconSize);
+                            ImGui.Image(wrap.ImGuiHandle, weatherIconSize);
                         else
                             ImGui.Dummy(weatherIconSize);
                     }
@@ -381,13 +378,13 @@ public partial class Interface
             }
             else if (fish.WeatherIcons.Length > 0)
             {
-                AlignTextToSize(fish.WeatherIcons.Length > 1 ? "要求其中之一" : "要求", weatherIconSize);
+                AlignTextToSize(fish.WeatherIcons.Length > 1 ? "Requires one of" : "Requires", weatherIconSize);
                 style.Push(ImGuiStyleVar.ItemSpacing, Vector2.One * ImGuiHelpers.GlobalScale);
                 foreach (var w in fish.WeatherIcons)
                 {
                     ImGui.SameLine();
                     if (w.TryGetWrap(out var wrap, out _))
-                        ImGui.Image(wrap.Handle, weatherIconSize);
+                        ImGui.Image(wrap.ImGuiHandle, weatherIconSize);
                     else
                         ImGui.Dummy(weatherIconSize);
                 }
@@ -398,7 +395,7 @@ public partial class Interface
         {
             if (fish.Bait.Length == 0)
             {
-                ImUtf8.TextFramed("未知钓法"u8, 0xFF0000A0);
+                ImUtf8.TextFramed("Unknown Catch Method"u8, 0xFF0000A0);
                 return;
             }
 
@@ -409,7 +406,7 @@ public partial class Interface
             if (fish.Snagging != null)
             {
                 if (fish.Snagging.TryGetWrap(out var wrap, out _))
-                    ImGui.Image(wrap.Handle, iconSize);
+                    ImGui.Image(wrap.ImGuiHandle, iconSize);
                 else
                     ImGui.Dummy(iconSize);
                 ImGui.SameLine();
@@ -418,7 +415,7 @@ public partial class Interface
             if (fish.Lure != null)
             {
                 if (fish.Lure.TryGetWrap(out var wrap, out _))
-                    ImGui.Image(wrap.Handle, iconSize);
+                    ImGui.Image(wrap.ImGuiHandle, iconSize);
                 else
                     ImGui.Dummy(iconSize);
                 ImGui.SameLine();
@@ -430,7 +427,7 @@ public partial class Interface
             {
                 size = iconSize;
                 if (bait.Icon.TryGetWrap(out var wrap, out _))
-                    ImGui.Image(wrap.Handle, size);
+                    ImGui.Image(wrap.ImGuiHandle, size);
                 else
                     ImGui.Dummy(size);
 
@@ -441,7 +438,7 @@ public partial class Interface
                     using var _ = ImRaii.Group();
                     style.Push(ImGuiStyleVar.FramePadding, Vector2.Zero);
                     if (bait.HookSet!.TryGetWrap(out wrap, out var _))
-                        ImGui.Image(wrap.Handle, smallIconSize);
+                        ImGui.Image(wrap.ImGuiHandle, smallIconSize);
                     else
                         ImGui.Dummy(smallIconSize);
                     ImUtf8.TextFramed(bait.Bite.Item1, bait.Bite.Item2, smallIconSize);
@@ -475,7 +472,7 @@ public partial class Interface
 
                 ImGui.SameLine();
                 ImGui.SetCursorPosY(pos + offsetBig);
-                ImUtf8.Text(" ? ");
+                ImUtf8.Text(" → ");
                 ImGui.SameLine();
             }
 
@@ -497,7 +494,7 @@ public partial class Interface
                 ImUtf8.TextFramed(predator.Amount, 0xFF0040C0, size);
                 ImGui.SameLine();
                 if (predator.Icon.TryGetWrap(out var wrap, out _))
-                    ImGui.Image(wrap.Handle, size);
+                    ImGui.Image(wrap.ImGuiHandle, size);
                 else
                     ImGui.Dummy(size);
                 style.Push(ImGuiStyleVar.ItemSpacing, new Vector2(3 * ImGuiHelpers.GlobalScale, 0));
@@ -538,7 +535,7 @@ public partial class Interface
         private static void PrintPoints(ExtendedFish fish)
         {
             if (fish.Data.Points > 0)
-                ImUtf8.TextFramed($"任务评价: {fish.Data.Points} 点", 0xFF006400);
+                ImUtf8.TextFramed($"Worth {fish.Data.Points} Points", 0xFF006400);
         }
 
         public void SetTooltip(Territory territory, Vector2 iconSize, Vector2 smallIconSize, Vector2 weatherIconSize, bool printName,
@@ -548,7 +545,7 @@ public partial class Interface
             using var style   = ImRaii.PushStyle(ImGuiStyleVar.ItemSpacing, ImGui.GetStyle().ItemSpacing * new Vector2(1f, 1.5f));
             if (printName)
                 PrintName(this);
-            ImUtf8.TextFramed($"物品 ID: {Data.ItemId}", 0xFF808080);
+            ImUtf8.TextFramed($"Item ID: {Data.ItemId}", 0xFF808080);
             PrintTime(this);
             PrintWeather(this, weatherIconSize);
             PrintBait(this, territory, iconSize, smallIconSize);

@@ -1,16 +1,22 @@
-using Dalamud.Game.Addon.Lifecycle;
-using Dalamud.Game.Chat;
+﻿using Dalamud.Game.Addon.Lifecycle;
 using Dalamud.Game.Addon.Lifecycle.AddonArgTypes;
 using Dalamud.Game.ClientState.Conditions;
-using Dalamud.Game.ClientState.Objects.Types;
-using Dalamud.Game.Gui.Toast;
 using Dalamud.Game.Text;
 using Dalamud.Game.Text.SeStringHandling;
 using Dalamud.Game.Text.SeStringHandling.Payloads;
 using Dalamud.Utility;
-using ElliLib.Extensions;
+using ECommons;
+using ECommons.Automation;
+using ECommons.Automation.LegacyTaskManager;
+using ECommons.DalamudServices;
+using ECommons.ExcelServices;
+using ECommons.EzIpcManager;
+using ECommons.GameHelpers;
+using ECommons.MathHelpers;
+using ECommons.UIHelpers.AddonMasterImplementations;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.Game.Control;
+using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using FFXIVClientStructs.FFXIV.Component.GUI;
@@ -18,21 +24,16 @@ using GatherBuddy.AutoGather.Extensions;
 using GatherBuddy.AutoGather.Helpers;
 using GatherBuddy.AutoGather.Lists;
 using GatherBuddy.AutoGather.Movement;
-using GatherBuddy.Automation;
 using GatherBuddy.Classes;
 using GatherBuddy.CustomInfo;
 using GatherBuddy.Data;
 using GatherBuddy.Enums;
-using GatherBuddy.Helpers;
 using GatherBuddy.Interfaces;
 using GatherBuddy.Plugin;
 using GatherBuddy.SeFunctions;
-using GatherBuddy.Time;
-using GatherBuddy.Utilities;
 using Lumina.Excel.Sheets;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Numerics;
 using System.Threading.Tasks;
@@ -48,17 +49,15 @@ namespace GatherBuddy.AutoGather
         public AutoGather(GatherBuddy plugin)
         {
             // Initialize the task manager
-            TaskManager                  =  new(Dalamud.Framework);
+            TaskManager                  =  new();
             TaskManager.ShowDebug        =  false;
             _plugin                      =  plugin;
             _soundHelper                 =  new SoundHelper();
             _advancedUnstuck             =  new();
             _activeItemList              =  new ActiveItemList(plugin.AutoGatherListsManager, this);
-            _diadem                      =  new Diadem();
             ArtisanExporter              =  new Reflection.ArtisanExporter(plugin.AutoGatherListsManager);
-            Dalamud.Chat.CheckMessageHandled += OnMessageHandled;
-            Dalamud.ToastGui.QuestToast += OnQuestToast;
-            //Dalamud.AddonLifecycle.RegisterListener(AddonEvent.PreFinalize, "Gathering", OnGatheringFinalize);
+            Svc.Chat.CheckMessageHandled += OnMessageHandled;
+            //Svc.AddonLifecycle.RegisterListener(AddonEvent.PreFinalize, "Gathering", OnGatheringFinalize);
             _plugin.FishRecorder.Parser.CaughtFish += OnFishCaught;
         }
         public Fish? LastCaughtFish { get; private set; }
@@ -67,12 +66,6 @@ namespace GatherBuddy.AutoGather
         {
             PreviouslyCaughtFish = LastCaughtFish;
             LastCaughtFish       = arg1;
-            
-            if (_consecutiveAmissCount > 0)
-            {
-                GatherBuddy.Log.Information($"[AutoGather] 成功钓上鱼, 脱钩计数已从 {_consecutiveAmissCount} 重置为 0");
-                _consecutiveAmissCount = 0;
-            }
             
             if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
             {
@@ -83,20 +76,8 @@ namespace GatherBuddy.AutoGather
                     
                     if (currentCount >= targetQuantity)
                     {
-                        GatherBuddy.Log.Information($"[AutoGather] 已达到目标鱼数量 ({currentCount}/{targetQuantity}), 立即停止钓鱼");
-                        AutoHook.SetPluginState?.Invoke(false);
+                        Svc.Log.Information($"[AutoGather] Target fish count reached ({currentCount}/{targetQuantity}), disabling auto-cast");
                         AutoHook.SetAutoStartFishing?.Invoke(false);
-                        
-                        TaskManager.Enqueue(() =>
-                        {
-                            if (IsFishing)
-                            {
-                                CleanupAutoHook();
-                                QueueQuitFishingTasks();
-                                _activeItemList.ForceRefresh();
-                            }
-                            return true;
-                        });
                     }
                 }
             }
@@ -104,75 +85,15 @@ namespace GatherBuddy.AutoGather
 
         // Track the current gather target for robust node handling
         private GatherTarget? _currentGatherTarget;
-        private bool _waitingForFishingToFinishAfterTargetChange = false;
-        private volatile bool _fishDetectedPlayer = false;
-        private volatile bool _fishWaryDetected = false;
-        private volatile bool _processingFishingToast = false;
-        private int _consecutiveAmissCount = 0;
-        private DateTime _stuckAtSpotStartTime = DateTime.MinValue;
-        private DateTime _lastJiggleTime = DateTime.MinValue;
-        private readonly Dictionary<GatherTarget, int> _jiggleAttempts = new();
-        private readonly Dictionary<GatherTarget, DateTime> _fishingSpotArrivalTime = new();
-        private const uint FishWaryMessageId = 5517;
-        private const uint FishAmissMessageId = 3516;
-        private Lumina.Excel.ExcelSheet<Lumina.Excel.Sheets.LogMessage>? _cachedLogMessages;
 
-        private void OnQuestToast(ref SeString message, ref QuestToastOptions options, ref bool isHandled)
+        private void OnMessageHandled(XivChatType type, int timestamp, ref SeString sender, ref SeString message, ref bool isHandled)
         {
             try
             {
-                var text = message.TextValue;
-                
-                if (string.IsNullOrEmpty(text) || text.Length < 10)
-                    return;
-                
-                _cachedLogMessages ??= Dalamud.GameData.GetExcelSheet<Lumina.Excel.Sheets.LogMessage>();
-                if (_cachedLogMessages == null)
-                    return;
-                
-                var logMsg = _cachedLogMessages.FirstOrDefault(x => x.Text.ExtractText() == text);
-                
-                if (logMsg.RowId != 0)
+                if (type is (XivChatType)2243)
                 {
-                    if (logMsg.RowId == FishWaryMessageId)
-                    {
-                        if (_processingFishingToast)
-                        {
-                            GatherBuddy.Log.Debug($"[AutoGather] 忽略重复的警惕提示, 正在处理前一个");
-                            return;
-                        }
-                        
-                        GatherBuddy.Log.Warning($"[AutoGather] 鱼类警惕警告 (ID: {logMsg.RowId}): '{text}' - 简单重新定位");
-                        _fishWaryDetected = true;
-                    }
-                    else if (logMsg.RowId == FishAmissMessageId)
-                    {
-                        if (_processingFishingToast)
-                        {
-                            GatherBuddy.Log.Debug($"[AutoGather] 忽略重复的脱钩提示, 正在处理前一个");
-                            return;
-                        }
-                        
-                        _consecutiveAmissCount++;
-                        GatherBuddy.Log.Warning($"[AutoGather] 检测到鱼类脱钩 (ID: {logMsg.RowId}, 次数: {_consecutiveAmissCount}): '{text}'");
-                        _fishDetectedPlayer = true;
-                    }
-                }
-            }
-            catch (Exception e)
-            {
-                GatherBuddy.Log.Error($"[AutoGather] 处理任务提示失败: {e}");
-            }
-        }
-
-        private void OnMessageHandled(IHandleableChatMessage chatMessage)
-        {
-            try
-            {
-                if (chatMessage.LogKind is (XivChatType)2243)
-                {
-                    var text = chatMessage.Message.TextValue;
-                    var id = Dalamud.GameData.GetExcelSheet<LogMessage>()
+                    var text = message.TextValue;
+                    var id = Svc.Data.GetExcelSheet<LogMessage>()
                         ?.FirstOrDefault(x => x.Text.ToString() == text).RowId;
 
                     LureSuccess = GatherBuddy.GameData.Fishes.Values.FirstOrDefault(f => f.FishData?.Unknown_70_1 == text) != null;
@@ -185,23 +106,20 @@ namespace GatherBuddy.AutoGather
             }
             catch (Exception e)
             {
-                GatherBuddy.Log.Error($"处理消息失败: {e}");
+                GatherBuddy.Log.Error($"Failed to handle message: {e}");
             }
         }
 
-        private void ResetPendingFishingTargetChange()
-            => _waitingForFishingToFinishAfterTargetChange = false;
-
-        private readonly GatherBuddy      _plugin;
-        private readonly SoundHelper      _soundHelper;
-        private readonly AdvancedUnstuck  _advancedUnstuck;
-        private readonly ActiveItemList   _activeItemList;
-        private readonly Diadem           _diadem;
+        private readonly GatherBuddy     _plugin;
+        private readonly SoundHelper     _soundHelper;
+        private readonly AdvancedUnstuck _advancedUnstuck;
+        private readonly ActiveItemList  _activeItemList;
 
         public Reflection.ArtisanExporter ArtisanExporter;
         public TaskManager                TaskManager { get; }
 
         private           bool             _enabled { get; set; } = false;
+        private           bool             _disabledBySystem = false;
 
         public bool Waiting
         {
@@ -222,7 +140,7 @@ namespace GatherBuddy.AutoGather
 
                 if (!value)
                 {
-                    AutoStatus = "空闲中...";
+                    AutoStatus = "Idle...";
                     TaskManager.Abort();
                     YesAlready.Unlock();
 
@@ -233,27 +151,26 @@ namespace GatherBuddy.AutoGather
                     
                     CleanupAutoHook();
 
+                    if (VNavmesh.Enabled && IsPathGenerating)
+                        VNavmesh.Nav.PathfindCancelAll();
                     StopNavigation();
+                    CurrentFarNodeLocation   = null;
                     _homeWorldWarning        = false;
                     _diademQueuingInProgress = false;
                     FarNodesSeenSoFar.Clear();
                     VisitedNodes.Clear();
+                    _diademSpawnAreaLastChecked.Clear();
+                    _currentDiademPatrolTarget = null;
+                    _diademRecentlyGatheredNodes.Clear();
+                    _diademArborCallUsedAt = DateTime.MinValue;
+                    _diademArborCallTarget = null;
+                    _diademVisitedNodes.Clear();
                     _lastAetherTarget = DateTime.MinValue;
-                    _diademPathIndex = -1;
-                    _fishDetectedPlayer = false;
-                    _fishWaryDetected = false;
-                    _processingFishingToast = false;
-                    _consecutiveAmissCount = 0;
-                    _stuckAtSpotStartTime = DateTime.MinValue;
-                    _lastJiggleTime = DateTime.MinValue;
-                    _jiggleAttempts.Clear();
-                    _fishingSpotArrivalTime.Clear();
-                    ResetPendingFishingTargetChange();
-                    Dalamud.ToastGui.ErrorToast -= HandleNodeInteractionErrorToast;
+                    _lastNonTimedNodeTerritory = 0;
+                    _lastUmbralWeather = 0;
+                    _hasGatheredUmbralThisSession = false;
+                    _autoRetainerWasEnabledBeforeDiadem = false;
                     
-                    // Restore normal controller blocking (blocks everything)
-                    GatherBuddy.ControllerSupport?.SetBlockingMode(true, true, true);
-
                     ClearSpearfishingSessionData();
                     
                     if (_autoRetainerMultiModeEnabled && AutoRetainer.IsEnabled)
@@ -263,33 +180,29 @@ namespace GatherBuddy.AutoGather
                             AutoRetainer.DisableAllFunctions?.Invoke();
                             _autoRetainerMultiModeEnabled = false;
                             _originalCharacterNameWorld = null;
-                            GatherBuddy.Log.Debug("禁用 AutoGather 时关闭了 AutoRetainer 多模式");
+                            GatherBuddy.Log.Debug("Disabled AutoRetainer MultiMode on AutoGather shutdown");
                         }
                         catch (Exception e)
                         {
-                            GatherBuddy.Log.Error($"禁用 AutoRetainer 多模式失败: {e.Message}");
+                            GatherBuddy.Log.Error($"Failed to disable AutoRetainer MultiMode: {e.Message}");
                         }
                     }
                     
-                if (GatherBuddy.CollectableManager?.IsRunning == true)
-                {
-                    GatherBuddy.Log.Debug("[AutoGather] 正在停止收藏品交付 (用户禁用了自动采集)");
-                    GatherBuddy.CollectableManager?.Stop();
+                    if (GatherBuddy.Config.CollectableConfig.CollectOnAutogatherDisabled && _disabledBySystem)
+                    {
+                        GatherBuddy.Log.Debug("[AutoGather] Triggering collectable turn-in after AutoGather ended (system disable)");
+                        GatherBuddy.CollectableManager?.Start();
+                    }
+                    else if (GatherBuddy.CollectableManager?.IsRunning == true)
+                    {
+                        GatherBuddy.Log.Debug("[AutoGather] Stopping collectable turn-in (user disabled AutoGather)");
+                        GatherBuddy.CollectableManager?.Stop();
+                    }
+                    
+                    _disabledBySystem = false;
                 }
-                
-                if (Crafting.CraftingGatherBridge.GetTemporaryGatherList() != null && !Crafting.CraftingGatherBridge.PreserveListOnDisable)
-                {
-                    GatherBuddy.Log.Debug("[AutoGather] 正在清理临时 Vulcan 采集列表 (用户禁用了自动采集)");
-                    Crafting.CraftingGatherBridge.DeleteTemporaryGatherList();
-                }
-            }
-        else
+            else
             {
-                if (!ValidateActiveItemsPerception())
-                {
-                    return;
-                }
-                
                 WentHome = true; //Prevents going home right after enabling auto-gather
                 if (AutoHook.Enabled)
                 {
@@ -298,9 +211,6 @@ namespace GatherBuddy.AutoGather
                 }
                 YesAlready.Lock();
                 DisableQuickGathering();
-                
-                // Switch to automation blocking mode (only block buttons, allow movement/camera)
-                GatherBuddy.ControllerSupport?.SetBlockingMode(false, false, true);
             }
 
                 _enabled = value;
@@ -326,12 +236,12 @@ namespace GatherBuddy.AutoGather
                 if (command.Contains("/li "))
                     command = command.Replace("/li ", "");
                 Lifestream.ExecuteCommand(command);
-                TaskManager.EnqueueImmediate(() => !Lifestream.IsBusy(), 120000, "等待 Lifestream 传送完成");
+                TaskManager.EnqueueImmediate(() => !Lifestream.IsBusy(), 120000, "Wait until Lifestream is done");
                 return true;
             }
             else
             {
-                GatherBuddy.Log.Warning("未安装或启用 Lifestream");
+                GatherBuddy.Log.Warning("Lifestream not found or not ready");
                 return false;
             }
         }
@@ -348,7 +258,7 @@ namespace GatherBuddy.AutoGather
             }
             catch (Exception e)
             {
-                GatherBuddy.Log.Error($"禁用快速采集失败: {e.Message}");
+                GatherBuddy.Log.Error($"Failed to disable Quick Gathering: {e.Message}");
             }
         }
 
@@ -366,14 +276,13 @@ namespace GatherBuddy.AutoGather
 
         public void DoAutoGather()
         {
-            var currentTerritory = Dalamud.ClientState.TerritoryType;
+            var currentTerritory = Svc.ClientState.TerritoryType;
             if (_lastTerritory != currentTerritory)
             {
                 _lastTerritory = currentTerritory;
-                _diademPathIndex = -1;
                 
-                var isInDiademOrFirmament = currentTerritory == Diadem.Territory.Id;
-                var wasInDiademOrFirmament = _lastTerritory == Diadem.Territory.Id;
+                var isInDiademOrFirmament = currentTerritory is 901 or 929 or 939 or 886;
+                var wasInDiademOrFirmament = _lastTerritory is 901 or 929 or 939 or 886;
                 
                 if (isInDiademOrFirmament && !wasInDiademOrFirmament)
                 {
@@ -381,7 +290,7 @@ namespace GatherBuddy.AutoGather
                     if (_autoRetainerWasEnabledBeforeDiadem)
                     {
                         GatherBuddy.Config.AutoGatherConfig.AutoRetainerMultiMode = false;
-                        GatherBuddy.Log.Information("在云冠群岛/天穹街时临时禁用了 AutoRetainer 集成");
+                        GatherBuddy.Log.Information("Temporarily disabled AutoRetainer integration while in Diadem/Firmament");
                     }
                 }
                 else if (!isInDiademOrFirmament && wasInDiademOrFirmament)
@@ -389,16 +298,21 @@ namespace GatherBuddy.AutoGather
                     if (_autoRetainerWasEnabledBeforeDiadem)
                     {
                         GatherBuddy.Config.AutoGatherConfig.AutoRetainerMultiMode = true;
-                        GatherBuddy.Log.Information("离开云冠群岛/天穹街后重新启用了 AutoRetainer 集成");
+                        GatherBuddy.Log.Information("Re-enabled AutoRetainer integration after leaving Diadem/Firmament");
                         _autoRetainerWasEnabledBeforeDiadem = false;
                     }
                 }
+                
+                if (currentTerritory is 901 or 929 or 939)
+                {
+                    _hasGatheredUmbralThisSession = false;
+                    _lastUmbralWeather = 0;
+                }
             }
 
-            // Reset the flag before checking Enabled to get correct state even if auto-gather is disabled.
-            // Integrity == 0 is checked to ensure we can use Luck if Revisit triggers.
-            if (LuckUsed && (!IsGathering || (GatheringWindowReader?.IntegrityRemaining ?? 0) == 0))
-                LuckUsed = false; 
+            // Always check these first
+            if (!IsGathering)
+                LuckUsed = false; //Reset the flag even if auto-gather was disabled mid-gathering
 
             if (!Enabled)
             {
@@ -408,71 +322,74 @@ namespace GatherBuddy.AutoGather
             // If we are not gathering and _currentGatherTarget is set, we just finished gathering or left the node
             if (!IsGathering && _currentGatherTarget != null)
             {
-                var gatherTarget = _currentGatherTarget.Value;
+                var gatherTarget = _currentGatherTarget!;
                 // Mark the node as visited if possible
-                var targetNode = Dalamud.Targets.Target ?? Dalamud.Targets.PreviousTarget;
+                var targetNode = Svc.Targets.Target ?? Svc.Targets.PreviousTarget;
                 if (targetNode != null && targetNode.ObjectKind is ObjectKind.GatheringPoint)
                 {
                     _activeItemList.MarkVisited(targetNode);
-                    var gatherable = gatherTarget.Gatherable;
-                    var node = gatherTarget.Node;
-                    var fishingSpot = gatherTarget.FishingSpot;
+                    var gatherable = gatherTarget.Value.Gatherable;
+                    var node = gatherTarget.Value.Node;
                     
-                    if (gatherable != null && (gatherable.NodeType == NodeType.常规 || gatherable.NodeType == NodeType.限时)
-                        && VisitedNodes.LastOrDefault() != targetNode.BaseId
-                        && node != null && node.WorldPositions.ContainsKey(targetNode.BaseId))
+                    if (Functions.InTheDiadem())
                     {
-                        FarNodesSeenSoFar.Clear();
-
-                        while (VisitedNodes.Count > (node.WorldPositions.Count <= 4 ? 2 : 4) - 1)
-                            VisitedNodes.RemoveAt(0);
-
-                        if (node.WorldPositions.Count > 2)
-                            VisitedNodes.Add(targetNode.BaseId);
+                        var isUmbralNode = UmbralNodes.UmbralNodeData.Any(entry => entry.NodeId == targetNode.DataId);
+                        
+                        if (isUmbralNode)
+                        {
+                            _hasGatheredUmbralThisSession = true;
+                            
+                            FarNodesSeenSoFar.Clear();
+                            _diademVisitedNodes.Clear();
+                            _diademRecentlyGatheredNodes.Clear();
+                        }
+                        else
+                        {
+                            _diademRecentlyGatheredNodes.AddLast(targetNode.Position);
+                            while (_diademRecentlyGatheredNodes.Count > DiademNodeRespawnWindow)
+                                _diademRecentlyGatheredNodes.RemoveFirst();
+                                
+                            _diademVisitedNodes.AddLast(targetNode.Position);
+                            while (_diademVisitedNodes.Count > DiademVisitedNodeTrackingCount)
+                                _diademVisitedNodes.RemoveFirst();
+                                
+                            FarNodesSeenSoFar.Add(targetNode.Position);
+                        }
                     }
-                    else if (gatherTarget.Fish?.IsSpearFish == true && fishingSpot != null
-                        && VisitedNodes.LastOrDefault() != targetNode.BaseId
-                        && fishingSpot.WorldPositions.ContainsKey(targetNode.BaseId))
+                    
+                    if (gatherable != null && (gatherable.NodeType == NodeType.Regular || gatherable.NodeType == NodeType.Ephemeral)
+                        && (VisitedNodes.Last?.Value != targetNode.DataId)
+                        && node != null && node.WorldPositions.ContainsKey(targetNode.DataId))
                     {
-                        FarNodesSeenSoFar.Clear();
-
-                        while (VisitedNodes.Count > (fishingSpot.WorldPositions.Count <= 4 ? 2 : 4) - 1)
-                            VisitedNodes.RemoveAt(0);
-
-                        if (fishingSpot.WorldPositions.Count > 2)
-                            VisitedNodes.Add(targetNode.BaseId);
+                        if (!Functions.InTheDiadem())
+                            FarNodesSeenSoFar.Clear();
+                        VisitedNodes.AddLast(targetNode.DataId);
+                        while (VisitedNodes.Count > (node.WorldPositions.Count <= 4 ? 2 : 4))
+                            VisitedNodes.RemoveFirst();
                     }
                 }
-                if (gatherTarget.Item != null)
-                    _plugin.AutoGatherListsManager.RemoveCompletedItemFromLists(gatherTarget.Item);
                 // Unset the current gather target when leaving the node
                 _currentGatherTarget = null;
-                ResetPendingFishingTargetChange();
             }
 
 
-            //try
-            //{
-            //    if (!NavReady)
-            //    {
-            //        AutoStatus = "等待导航中...";
-            //        return;
-            //    }
-            //}
-            //catch (Exception)
-            //{
-            //    //GatherBuddy.Log.Error(e.Message);
-            //    AutoStatus = "vnavmesh communication failed. Do you have it installed??";
-            //    return;
-            //}
+            try
+            {
+                if (!NavReady)
+                {
+                    AutoStatus = "Waiting for Navmesh...";
+                    return;
+                }
+            }
+            catch (Exception)
+            {
+                //GatherBuddy.Log.Error(e.Message);
+                AutoStatus = "vnavmesh communication failed. Do you have it installed??";
+                return;
+            }
 
             if (HandleFishingCollectable())
                 return;
-
-            HandlePathfinding(); // This should be done before checking TaskManager
-
-            if (Dalamud.Conditions[ConditionFlag.Jumping61] && IsPathing) // Jumping Windmire
-                StopNavigation();
 
             if (TaskManager.IsBusy)
             {
@@ -483,79 +400,82 @@ namespace GatherBuddy.AutoGather
             if (!_homeWorldWarning && !Functions.OnHomeWorld())
             {
                 _homeWorldWarning = true;
-                Communicator.PrintError("当前不在原始服务器, 部分物品无法采集");
+                Communicator.PrintError("You are not on your home world, some items will not be gatherable.");
             }
 
             if (DiscipleOfLand.NextTreasureMapAllowance == DateTime.MinValue)
             {
                 //Wait for timer refresh
-                AutoStatus = "刷新采集时钟中...";
+                AutoStatus = "Refreshing timers...";
                 DiscipleOfLand.RefreshNextTreasureMapAllowance();
                 return;
             }
 
             if (!CanAct && !_diademQueuingInProgress)
             {
-                if (!Dalamud.Conditions[ConditionFlag.ExecutingGatheringAction])
-                    AutoStatus = "当前无法行动";
+                AutoStatus = Dalamud.Conditions[ConditionFlag.Gathering] ? "Gathering..." : "Player is busy...";
                 return;
             }
 
 
             if (FreeInventorySlots == 0)
             {
-                if (GatherBuddy.CollectableManager?.IsRunning == true)
-                {
-                    AutoStatus = "正在交易收藏品...";
-                    return;
-                }
-                
                 if (HasReducibleItems())
                 {
-                    if (Player.Job == 18 /* FSH */ && GatherBuddy.Config.AutoGatherConfig.DeferReductionDuringFishingBuffs && (IsFishing || HasActiveFishingBuff()))
-                    {
-                        return;
-                    }
-                    else if (IsGathering)
+                    if (IsGathering)
                         CloseGatheringAddons();
                     else
                         ReduceItems(false);
                 }
-                else if (HasCollectables())
-                {
-                    GatherBuddy.Log.Information("[AutoGather] 背包已满收藏品 - 开始交付");
-                    AutoStatus = "正在交易收藏品...";
-                    if (IsGathering)
-                        CloseGatheringAddons();
-                    else
-                        GatherBuddy.CollectableManager?.Start(Collectables.CollectableRunSource.AutoGather);
-                }
                 else
                 {
-                    AbortAutoGather("背包物品已满");
+                    AbortAutoGather("Inventory is full");
                 }
 
                 return;
             }
 
-            if (Player.Job == 18 /* FSH */ && _currentGatherTarget != null && IsFishing)
+            if (IsGathering && Player.Job == Job.FSH && _activeItemList.ShouldUpdateWhileFishing())
             {
-                var fish = _currentGatherTarget.GetValueOrDefault();
-                if (FishingSpotData.TryGetValue(fish, out var fishingSpotData))
+                var nextAfterRefresh = _activeItemList.GetNextOrDefault(new List<uint>());
+                var currentFishId = _currentAutoHookTarget?.Fish?.ItemId ?? 0;
+                var currentFishIsTimed = _currentAutoHookTarget?.Time != Time.TimeInterval.Always;
+                
+                var currentTargetStillAvailable = nextAfterRefresh.Any(g => g.Fish?.ItemId == currentFishId);
+                
+                var hasNewTimedTarget = nextAfterRefresh.Any(g => g.Fish != null
+                    && g.Time != Time.TimeInterval.Always
+                    && g.Fish!.ItemId != currentFishId);
+                
+                var shouldSwitchToNewTimed = !currentFishIsTimed && hasNewTimedTarget;
+                var shouldQuitExpiredTimed = currentFishIsTimed && !currentTargetStillAvailable;
+                
+                if (shouldSwitchToNewTimed || shouldQuitExpiredTimed)
                 {
-                    if (GatherBuddy.Config.AutoGatherConfig.MaxFishingSpotMinutes > 0 && fishingSpotData.Expiration < DateTime.Now)
+                    var reason = shouldSwitchToNewTimed
+                        ? "timed/weather fish available" 
+                        : "current timed fish window ended";
+                    Svc.Log.Information($"[AutoGather] {reason} - quitting fishing to pursue new target");
+                    
+                    if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
                     {
-                        GatherBuddy.Log.Information($"[AutoGather] 钓场计时器在主循环中过期 ({GatherBuddy.Config.AutoGatherConfig.MaxFishingSpotMinutes} 分钟), 正在重新定位...");
-                        
-                        if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
-                        {
-                            AutoHook.SetPluginState?.Invoke(false);
-                            AutoHook.SetAutoStartFishing?.Invoke(false);
-                        }
-                        QueueQuitFishingTasks();
-                        return;
+                        AutoHook.SetAutoStartFishing?.Invoke(false);
                     }
+                    
+                    CleanupAutoHook();
+                    QueueQuitFishingTasks();
+                    _activeItemList.ForceRefresh();
+                    return;
                 }
+            }
+
+            if (_activeItemList.GetNextOrDefault(new List<uint>()).Any(g => g.Fish != null)
+             && !GatherBuddy.Config.AutoGatherConfig.FishDataCollection)
+            {
+                Communicator.PrintError(
+                    "You have fish on your auto-gather list but you have not opted in to fishing data collection. Auto-gather cannot continue. Please enable fishing data collection in your configuration options or remove fish from your auto-gather lists.");
+                AbortAutoGather();
+                return;
             }
 
             if (IsGathering)
@@ -563,80 +483,73 @@ namespace GatherBuddy.AutoGather
                 // Set the current gather target when entering a node
                 if (_currentGatherTarget == null)
                 {
-                    _currentGatherTarget = _activeItemList.CurrentOrDefault;
+                    if (!_activeItemList.IsInitialized)
+                        _currentGatherTarget = _activeItemList.GetNextOrDefault([Svc.Targets.Target!.DataId]).FirstOrDefault();
+                    else
+                        _currentGatherTarget = _activeItemList.CurrentOrDefault;
                 }
+
+                IEnumerable<GatherTarget> gatherTarget = _currentGatherTarget != null ? new[] { (GatherTarget)_currentGatherTarget } : Array.Empty<GatherTarget>();
 
                 if (!GatherBuddy.Config.AutoGatherConfig.DoGathering)
                     return;
 
+                AutoStatus = "Gathering...";
                 StopNavigation();
 
-                if (Player.Job == 18 /* FSH */)
+                var fish = _activeItemList.GetNextOrDefault(new List<uint>()).Where(g => g.Fish != null);
+                if (fish.Any() && Player.Job == Job.FSH)
                 {
-                    AutoStatus = "钓鱼中...";
-                    var fish = _currentGatherTarget.GetValueOrDefault();
-                    var isSpearfishing = Dalamud.Targets.Target?.ObjectKind == ObjectKind.GatheringPoint;
+                    var isSpearfishing = fish.First().Fish?.IsSpearFish == true;
                     
-                    if (isSpearfishing && fish.Fish != null)
+                    if (isSpearfishing)
                     {
                         _wasGatheringSpearfish = true;
                         _wasAtShadowNode = _currentGatherTarget?.FishingSpot?.IsShadowNode == true;
                         
-                        var currentFishId = fish.Fish.ItemId;
+                        var currentFishId = fish.First().Fish?.ItemId ?? 0;
                         var targetFishId = _currentAutoHookTarget?.Fish?.ItemId ?? 0;
                         var now = DateTime.Now;
                         
                         if (!_currentAutoHookTarget.HasValue || targetFishId != currentFishId)
                         {
-                            SetupAutoHookForFishing(fish);
+                            SetupAutoHookForFishing(fish.First());
                             _lastAutoHookSetupTime = now;
                             _autoHookSetupComplete = false;
                         }
                         else if (!_autoHookSetupComplete && (now - _lastAutoHookSetupTime).TotalSeconds >= 1.0)
                         {
-                            SetupAutoHookForFishing(fish);
+                            SetupAutoHookForFishing(fish.First());
                             _lastAutoHookSetupTime = now;
                         }
                         return;
                     }
-
-                    var nextTarget = _activeItemList.GetNextOrDefault();
-                    if (!isSpearfishing && (nextTarget == default || nextTarget.Item != _currentGatherTarget?.Item))
-                    {
-                        if (IsFishing && AutoHook.Enabled)
-                        {
-                            AutoStatus = "正在等待当前抛竿完成, 再切换目标...";
-                            if (!_waitingForFishingToFinishAfterTargetChange)
-                            {
-                                _waitingForFishingToFinishAfterTargetChange = true;
-                                var nextTargetName = nextTarget == default ? "无活跃目标" : nextTarget.Item.Name[GatherBuddy.Language];
-                                GatherBuddy.Log.Debug($"[AutoGather] 当前钓鱼目标 {fish.Item.Name[GatherBuddy.Language]} 已不可用, 等待抛竿完成后切换到 {nextTargetName}");
-                                AutoHook.SetAutoStartFishing(false);
-                            }
-                        }
-                        else
-                        {
-                            ResetPendingFishingTargetChange();
-                            CleanupAutoHook();
-                            QueueQuitFishingTasks();
-                        }
-                        return;
-                    }
-                    ResetPendingFishingTargetChange();
-
+                    
                     if (GatherBuddy.Config.AutoGatherConfig.UseNavigation)
                     {
+                        var pathGenerating = IsPathGenerating;
+                        var pathing = IsPathing;
+                        var unstuckResult = _advancedUnstuck.Check(CurrentDestination, pathGenerating, pathing);
+                        if (unstuckResult == AdvancedUnstuckCheckResult.Fail)
+                        {
+                            StopNavigation();
+                            AutoStatus = "Advanced unstuck in progress!";
+                            return;
+                        }
                         DoFishMovement(fish);
                     }
                     DoFishingTasks(fish);
                     return;
                 }
 
-                AutoStatus = "采集中...";
+                if (!fish.Any() && Player.Job == Job.FSH)
+                {
+                    QueueQuitFishingTasks();
+                }
 
                 try
                 {
-                    DoActionTasks(_currentGatherTarget.Value);
+                    DoActionTasks(gatherTarget);
                 }
                 catch (NoGatherableItemsInNodeException)
                 {
@@ -645,7 +558,7 @@ namespace GatherBuddy.AutoGather
                 catch (NoCollectableActionsException)
                 {
                     Communicator.PrintError(
-                        "当前无可用的收藏品价值上升技能, 请在配置中至少启用一个收藏品技能");
+                        "Unable to pick a collectability increasing action to use. Make sure that at least one of the collectable actions is enabled.");
                     AbortAutoGather();
                 }
 
@@ -665,14 +578,14 @@ namespace GatherBuddy.AutoGather
 
             if (_wasGatheringSpearfish)
             {
-                GatherBuddy.Log.Debug("[AutoGather] 刺鱼完成, 正在更新捕获记录");
+                Svc.Log.Debug("[AutoGather] Finished spearfishing, updating catches");
                 _wasGatheringSpearfish = false;
-                GatherBuddy.Log.Debug($"[AutoGather] 之前在影子节点: {_wasAtShadowNode}");
+                Svc.Log.Debug($"[AutoGather] Was at shadow node: {_wasAtShadowNode}");
                 
                 // If we just finished at a shadow node, clear session data FIRST to allow respawn
                 if (_wasAtShadowNode)
                 {
-                    GatherBuddy.Log.Information("[AutoGather] 在影子节点完成钓鱼, 清除会话数据以允许重生");
+                    Svc.Log.Information("[AutoGather] Finished fishing at shadow node, clearing session data to allow respawn");
                     ClearSpearfishingSessionData();
                     _wasAtShadowNode = false;
                 }
@@ -692,140 +605,173 @@ namespace GatherBuddy.AutoGather
             var isPathGenerating = IsPathGenerating;
             var isPathing        = IsPathing;
 
-            if (!_advancedUnstuck.Check(CurrentDestination, isPathing))
+            switch (_advancedUnstuck.Check(CurrentDestination, isPathGenerating, isPathing))
             {
-                StopNavigation();
-                AutoStatus = $"尝试进一步脱离卡死";
-                return;
+                case AdvancedUnstuckCheckResult.Pass: break;
+                case AdvancedUnstuckCheckResult.Wait: return;
+                case AdvancedUnstuckCheckResult.Fail:
+                    StopNavigation();
+                    AutoStatus = $"Advanced unstuck in progress!";
+                    return;
             }
 
             if (isPathGenerating)
             {
-                AutoStatus = "正在生成路径...";
+                AutoStatus = "Generating path...";
                 return;
             }
 
-            if (Player.Job is 17 /* BTN */ or 16 /* MIN */ or 18 /* FSH */
+            if (Player.Job is Job.BTN or Job.MIN or Job.FSH
              && !isPathing
-             && !Dalamud.Conditions[ConditionFlag.Mounted])
+             && !Svc.Condition[ConditionFlag.Mounted])
             {
-                if (Player.Job == 18 /* FSH */ && TryUseFishingConsumables(GetFishingConsumablesPreset()))
-                    return;
-
                 if (SpiritbondMax > 0)
                 {
-                    if (Player.Job == 18 /* FSH */ && GatherBuddy.Config.AutoGatherConfig.DeferMateriaExtractionDuringFishingBuffs && (IsFishing || HasActiveFishingBuff()))
+                    if (IsGathering)
                     {
-                        return;
+                        QueueQuitFishingTasks();
                     }
-                    else
-                    {
-                        GatherBuddy.Log.Debug($"[Materia] 触发提取. 正在采集={IsGathering}, 精炼度满={SpiritbondMax}");
-                        if (IsGathering)
-                        {
-                            QueueQuitFishingTasks();
-                        }
 
-                        DoMateriaExtraction();
-                        return;
-                    }
+                    DoMateriaExtraction();
+                    return;
                 }
 
                 if (FreeInventorySlots < 20 && HasReducibleItems())
                 {
-                    if (Player.Job == 18 /* FSH */ && GatherBuddy.Config.AutoGatherConfig.DeferReductionDuringFishingBuffs && (IsFishing || HasActiveFishingBuff()))
-                    {
-                        return;
-                    }
-                    else
-                    {
-                        ReduceItems(GatherBuddy.Config.AutoGatherConfig.AlwaysReduceAllItems);
-                        return;
-                    }
-                }
-            }
-
-            if (TryUseAetherCannon()) return;
-
-            var next = _activeItemList.GetNextOrDefault();
-
-            if (next.Fish != null)
-            {
-                if (!GatherBuddy.Config.AutoGatherConfig.FishDataCollection)
-                {
-                    Communicator.PrintError(
-                        "自动采集列表中含有鱼类, 但尚未启用\"参与钓鱼数据收集\", 自动采集无法继续. 请在设置中启用\"参与钓鱼数据收集\", 或从自动采集列表中移除鱼类");
-                    AbortAutoGather();
-                    return;
-                }
-
-                if (!AutoHook.Enabled)
-                {
-                    Communicator.PrintError(
-                        "[GatherBuddyReborn] 自动采集列表中含有鱼类, 但 AutoHook 未安装或未启用, 自动采集无法继续. 请安装并启用 AutoHook, 或从自动采集列表中移除鱼类");
-                    AbortAutoGather();
+                    ReduceItems(false);
                     return;
                 }
             }
 
-            if (Diadem.IsInside && GatherBuddy.Config.AutoGatherConfig.DiademFarmCloudedNodes && _activeItemList.IsCloudedNodeConsumed)
+            if (Functions.InTheDiadem())
             {
+                TryUseAetherCannon();
+                
                 var currentWeather = EnhancedCurrentWeather.GetCurrentWeatherId();
-                if (_activeItemList.Any(x => x.Node?.NodeType == NodeType.梦幻 && x.Node.UmbralWeather.Id == currentWeather))
+                var isUmbralWeather = UmbralNodes.IsUmbralWeather(currentWeather);
+                var wasUmbralWeather = UmbralNodes.IsUmbralWeather(_lastUmbralWeather);
+                var weatherChanged = currentWeather != _lastUmbralWeather && _lastUmbralWeather != 0;
+                
+                var hasUmbralItems = HasUmbralItemsInActiveList();
+                var hasNormalDiademItems = _activeItemList.Any(target => target.Gatherable != null && 
+                    !UmbralNodes.UmbralNodeData.Any(entry => entry.ItemIds.Contains(target.Gatherable.ItemId)) &&
+                    target.Location.Territory.Id is 901 or 929 or 939);
+                
+                if (weatherChanged && isUmbralWeather && !wasUmbralWeather && hasUmbralItems && hasNormalDiademItems)
                 {
-                    GatherBuddy.Log.Information($"[Umbral] 已采集本影节点 - 正离开云冠群岛以重置会话");
+                    StopNavigation();
+                    Svc.Log.Information($"[Umbral] Weather changed to umbral ({currentWeather}) - leaving Diadem for clean state");
+                    _lastUmbralWeather = currentWeather;
+                    LeaveTheDiadem();
+                    return;
+                }
+                
+                if (weatherChanged && !isUmbralWeather && wasUmbralWeather && hasUmbralItems && hasNormalDiademItems)
+                {
+                    StopNavigation();
+                    Svc.Log.Information($"[Umbral] Weather changed to normal ({currentWeather}) - leaving Diadem for clean state");
+                    _lastUmbralWeather = currentWeather;
+                    LeaveTheDiadem();
+                    return;
+                }
+                
+                if (weatherChanged && !isUmbralWeather && wasUmbralWeather && hasUmbralItems && !hasNormalDiademItems)
+                {
+                    _hasGatheredUmbralThisSession = false;
+                    _lastUmbralWeather = currentWeather;
+                    Svc.Log.Information($"[Umbral] Weather changed to normal with only umbral items - leaving Diadem");
+                    StopNavigation();
+                    LeaveTheDiadem();
+                    return;
+                }
+                
+                _lastUmbralWeather = currentWeather;
+            }
+
+            var nearbyNodes = Svc.Objects.Where(o => o.ObjectKind == ObjectKind.GatheringPoint && o.IsTargetable).Select(o => o.DataId);
+            
+            var hasNormalDiademItemsInList = _activeItemList.Any(target => target.Gatherable != null && 
+                !UmbralNodes.UmbralNodeData.Any(entry => entry.ItemIds.Contains(target.Gatherable.ItemId)) &&
+                target.Location.Territory.Id is 901 or 929 or 939);
+            
+            var next = _activeItemList.GetNextOrDefault(nearbyNodes)
+                .Where(target => {
+                    if (Functions.InTheDiadem() && _hasGatheredUmbralThisSession && hasNormalDiademItemsInList)
+                    {
+                        var isUmbralItem = IsUmbralItem(target.Item);
+                        if (isUmbralItem)
+                        {
+                            return false;
+                        }
+                    }
+                    return true;
+                })
+                .OrderByDescending(nodes => nodes.Item.ItemId);
+            
+            if (Functions.InTheDiadem() && _hasGatheredUmbralThisSession)
+            {
+                var hasUmbralItems = HasUmbralItemsInActiveList();
+                
+                if (hasUmbralItems)
+                {
+                    Svc.Log.Information($"[Umbral] Gathered umbral node - leaving Diadem to reset session");
                     StopNavigation();
                     LeaveTheDiadem();
                     return;
                 }
             }
-
-            if (next == default)
+            if (!next.Any())
             {
                 if (!_activeItemList.HasItemsToGather)
                 {
                     AbortAutoGather();
                     return;
                 }
-
-                if (GatherBuddy.CollectableManager?.IsRunning == true)
+                
+                var hasUmbralItemsInList = HasUmbralItemsInActiveList();
+                if (hasUmbralItemsInList)
                 {
-                    AutoStatus = "正在交易收藏品...";
-                    return;
-                }
-
-                if (HasCollectables())
-                {
-                    AutoStatus = "正在交易收藏品...";
-                    GatherBuddy.CollectableManager?.Start(Collectables.CollectableRunSource.AutoGather);
-                    return;
-                }
-
-                var waitAtAetheryte = false;
-                if (GatherBuddy.Config.AutoGatherConfig.TeleportToNextNode)
-                {
-                    var nextTimed = _activeItemList.PeekNextTimed();
-                    waitAtAetheryte = nextTimed != default;
-                    if (waitAtAetheryte && nextTimed.Location.Territory.Id != currentTerritory)
+                    if (Functions.InTheDiadem())
                     {
-                        // Replace next target and fall through to teleport to its location.
-                        next = nextTimed;
-                    }
-                }
-
-                if (!waitAtAetheryte && GatherBuddy.Config.AutoGatherConfig.GoHomeWhenIdle)
-                    if (GoHome())
-                        return;
-
-                if (HasReducibleItems())
-                {
-                    if (Player.Job == 18 /* FSH */)
-                    {
-                        if (GatherBuddy.Config.AutoGatherConfig.DeferReductionDuringFishingBuffs && (IsFishing || HasActiveFishingBuff()))
+                        var currentWeather = EnhancedCurrentWeather.GetCurrentWeatherId();
+                        var isUmbralWeather = UmbralNodes.IsUmbralWeather(currentWeather);
+                        
+                        if (!isUmbralWeather)
                         {
+                            AutoStatus = "Waiting in Diadem for umbral weather...";
+                            if (!Waiting)
+                            {
+                                Waiting = true;
+                                _plugin.Ipc.AutoGatherWaiting();
+                            }
                             return;
                         }
-                        else
+                    }
+                    
+                    var firstUmbralItem = GetFirstUmbralItemFromActiveList();
+                    if (firstUmbralItem.Item != null)
+                    {
+                        var diademNode = GatherBuddy.GameData.GatheringNodes.Values
+                            .FirstOrDefault(node => node.Territory.Id is 901 or 929 or 939);
+                            
+                        if (diademNode != null)
+                        {
+                            var syntheticTarget = new GatherTarget(firstUmbralItem.Item, diademNode, Time.TimeInterval.Always, firstUmbralItem.Quantity);
+                            next = new[] { syntheticTarget }.OrderByDescending(nodes => nodes.Item.ItemId);
+                            AutoStatus = "Traveling to Diadem for umbral items...";
+                        }
+                    }
+                }
+                
+                if (!next.Any())
+                {
+                    if (GatherBuddy.Config.AutoGatherConfig.GoHomeWhenIdle)
+                        if (GoHome())
+                            return;
+
+                    if (HasReducibleItems())
+                    {
+                        if (Player.Job == Job.FSH)
                         {
                             if (IsGathering)
                             {
@@ -833,50 +779,47 @@ namespace GatherBuddy.AutoGather
                                 return;
                             }
 
-                            if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
-                            {
-                                TaskManager.Enqueue(() =>
-                                {
-                                    AutoHook.SetPluginState?.Invoke(false);
-                                    AutoHook.SetAutoStartFishing?.Invoke(false);
-                                });
-                            }
-
-                            ReduceItems(true, () =>
-                            {
-                                if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
-                                {
-                                    AutoHook.SetPluginState?.Invoke(true);
-                                    AutoHook.SetAutoStartFishing?.Invoke(true);
-                                }
-                            });
-                        }
-                    }
-                    else
+                    if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
                     {
-                        ReduceItems(true);
+                        TaskManager.Enqueue(() =>
+                        {
+                            AutoHook.SetPluginState?.Invoke(false);
+                            AutoHook.SetAutoStartFishing?.Invoke(false);
+                        });
+                    }
+                    
+                    ReduceItems(true, () =>
+                    {
+                        if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
+                        {
+                            AutoHook.SetPluginState?.Invoke(true);
+                            AutoHook.SetAutoStartFishing?.Invoke(true);
+                        }
+                    });
+                        }
+                        else
+                        {
+                            ReduceItems(true);
+                        }
+
+                        return;
                     }
 
-                    return;
-                }
-
-                if (next == default)
-                {
                     if (!Waiting)
                     {
                         Waiting = true;
                         _plugin.Ipc.AutoGatherWaiting();
                     }
 
-                    AutoStatus = "无待采集物品";
+                    AutoStatus = "No available items to gather";
                     return;
                 }
             }
 
             Waiting = false;
 
-            if (next.Item.ItemData.IsCollectable
-                 && !CheckCollectablesUnlocked(next.Location.GatheringType.ToGroup()))
+            if (next.Any(n => n.Item.ItemData.IsCollectable
+                 && !CheckCollectablesUnlocked(n.Fish != null ? GatheringType.Fisher : n.Gatherable!.GatheringType.ToGroup())))
             {
                 AbortAutoGather();
                 return;
@@ -885,27 +828,14 @@ namespace GatherBuddy.AutoGather
             if (RepairIfNeeded())
                 return;
 
-            if (GatherBuddy.CollectableManager?.IsRunning == true)
-            {
-                AutoStatus = "正在交易收藏品...";
-                return;
-            }
-            
-            if (HasCollectables())
-            {
-                AutoStatus = "正在交易收藏品...";
-                GatherBuddy.CollectableManager?.Start(Collectables.CollectableRunSource.AutoGather);
-                return;
-            }
-
             if (!GatherBuddy.Config.AutoGatherConfig.UseNavigation)
             {
-                AutoStatus = "等待采集点出现... (无导航模式)";
+                AutoStatus = "Waiting for Gathering Point... (No Nav Mode)";
                 return;
             }
 
-            var territoryId = currentTerritory;
-            var targetTerritoryId = next.Location.Territory.Id;
+            var territoryId = Svc.ClientState.TerritoryType;
+            var targetTerritoryId = next.First().Node?.Territory.Id ?? next.First().FishingSpot?.Territory.Id ?? 0;
             
             if (((territoryId == 129 && targetTerritoryId == 128)
              || (territoryId == 128 && targetTerritoryId == 129)
@@ -918,11 +848,11 @@ namespace GatherBuddy.AutoGather
                 {
                     if (Dalamud.Conditions[ConditionFlag.Gathering])
                     {
-                        AutoStatus = "正在关闭采集窗口以准备传送...";
+                        AutoStatus = "Closing gathering window before teleport...";
                         CloseGatheringAddons();
                         return;
                     }
-                    AutoStatus = "正在使用城内以太之光...";
+                    AutoStatus = "Using aethernet...";
                     StopNavigation();
                     string name = string.Empty;
                     var territorySheet = Dalamud.GameData.GetExcelSheet<TerritoryType>();
@@ -973,19 +903,19 @@ namespace GatherBuddy.AutoGather
                                 AutoHook.SetPluginState?.Invoke(false);
                                 AutoHook.SetAutoStartFishing?.Invoke(false);
                             }
-                            AutoStatus = "正在停止钓鱼以准备传送...";
+                            AutoStatus = "Closing fishing before teleport...";
                             QueueQuitFishingTasks();
                             return;
                         }
                         
                         if (Dalamud.Conditions[ConditionFlag.Gathering])
                         {
-                            AutoStatus = "正在关闭采集窗口以准备传送...";
+                            AutoStatus = "Closing gathering window before teleport...";
                             CloseGatheringAddons();
                             return;
                         }
                         
-                        AutoStatus = "正在传送到房区...";
+                        AutoStatus = "Teleporting to housing ward...";
                         StopNavigation();
                         
                         string wardCommand = targetTerritoryId switch
@@ -1011,15 +941,16 @@ namespace GatherBuddy.AutoGather
             }
             
             //Idyllshire to The Dravanian Hinterlands
-            if (territoryId == 478 && next.Location.Territory.Id == 399)
+            if ((territoryId == 478 && (next.First().Node?.Territory.Id == 399 || next.First().FishingSpot?.Territory.Id == 399))
+             || (territoryId == 418 && (next.First().Node?.Territory.Id is 901 or 929 or 939 || next.First().FishingSpot?.Territory.Id is 901 or 929 or 939)) && Lifestream.Enabled)
             {
-                var aetheryte = Dalamud.Objects.Where(x => x.ObjectKind == ObjectKind.Aetheryte && x.IsTargetable)
+                var aetheryte = Svc.Objects.Where(x => x.ObjectKind == ObjectKind.Aetheryte && x.IsTargetable)
                     .OrderBy(x => x.Position.DistanceToPlayer()).FirstOrDefault();
                 if (aetheryte != null)
                 {
                     if (aetheryte.Position.DistanceToPlayer() > 10)
                     {
-                        AutoStatus = "正在移动到以太之光...";
+                        AutoStatus = "Moving to aetheryte...";
                         if (!isPathing && !isPathGenerating)
                             Navigate(aetheryte.Position, false);
                     }
@@ -1027,24 +958,28 @@ namespace GatherBuddy.AutoGather
                     {
                         if (Dalamud.Conditions[ConditionFlag.Gathering])
                         {
-                            AutoStatus = "正在关闭采集窗口以准备传送...";
+                            AutoStatus = "Closing gathering window before teleport...";
                             CloseGatheringAddons();
                             return;
                         }
-                        AutoStatus = "传送中...";
+                        AutoStatus = "Teleporting...";
                         StopNavigation();
-                        var xCoord = next.Location.DefaultXCoord;
-                        var exit = xCoord < 2000 ? 91u : 92u;
-                        var name = Dalamud.GameData.GetExcelSheet<Lumina.Excel.Sheets.Aetheryte>().GetRow(exit).AethernetName.Value.Name.ToString();
+                        string name = string.Empty;
+                        switch (territoryId)
+                        {
+                            case 478:
+                                var xCoord = next.First().Node?.DefaultXCoord ?? next.First().FishingSpot?.DefaultXCoord ?? 0;
+                                var exit = xCoord < 2000 ? 91u : 92u;
+                                name = Dalamud.GameData.GetExcelSheet<Lumina.Excel.Sheets.Aetheryte>().GetRow(exit).AethernetName.Value.Name
+                                    .ToString();
+                                break;
+                            case 418:
+                                name = Dalamud.GameData.GetExcelSheet<TerritoryType>().GetRow(886).PlaceName.Value.Name.ToString()
+                                    .Split(" ")[1];
+                                break;
+                        }
 
-                        if (name == "天穹街") // 修改进入逻辑
-                        {
-                            TaskManager.Enqueue(() => Lifestream.ExecuteCommand("firmament"));
-                        }
-                        else
-                        {
-                            TaskManager.Enqueue(() => Lifestream.AethernetTeleport(name));
-                        }
+                        TaskManager.Enqueue(() => Lifestream.AethernetTeleport(name));
                         TaskManager.DelayNext(1000);
                         TaskManager.Enqueue(() => GenericHelpers.IsScreenReady());
                     }
@@ -1053,11 +988,11 @@ namespace GatherBuddy.AutoGather
                 }
             }
 
-            if (territoryId == 886 && next.Location.Territory.Id == Diadem.Territory.Id)
+            if (territoryId == 886 && (next.First().Node?.Territory.Id is 901 or 929 or 939 || next.First().FishingSpot?.Territory.Id is 901 or 929 or 939))
             {
-                if (JobAsGatheringType == GatheringType.未知)
+                if (JobAsGatheringType == GatheringType.Unknown)
                 {
-                    var requiredGatheringType = next.Location.GatheringType.ToGroup();
+                    var requiredGatheringType = next.First().Location.GatheringType.ToGroup();
                     if (ChangeGearSet(requiredGatheringType, 2400))
                     {
                         return;
@@ -1069,30 +1004,29 @@ namespace GatherBuddy.AutoGather
                     }
                 }
                 
-                var dutyNpc                    = Dalamud.Objects.FirstOrDefault(o => o.BaseId == 1031694);
+                var dutyNpc                    = Svc.Objects.FirstOrDefault(o => o.DataId == 1031694);
                 var selectStringAddon          = Dalamud.GameGui.GetAddonByName("SelectString");
                 var talkAddon                  = Dalamud.GameGui.GetAddonByName("Talk");
                 var selectYesNoAddon           = Dalamud.GameGui.GetAddonByName("SelectYesno");
                 var contentsFinderConfirmAddon = Dalamud.GameGui.GetAddonByName("ContentsFinderConfirm");
-                GatherBuddy.Log.Verbose($"界面: {selectStringAddon}, {talkAddon}, {selectYesNoAddon}, {contentsFinderConfirmAddon}");
+                Svc.Log.Verbose($"Addons: {selectStringAddon}, {talkAddon}, {selectYesNoAddon}, {contentsFinderConfirmAddon}");
                 if (dutyNpc != null && dutyNpc.Position.DistanceToPlayer() > 3)
                 {
-                    AutoStatus = "正在移动到云冠群岛 NPC...";
-                    var point = VNavmesh.Query.Mesh.NearestPoint(dutyNpc.Position, 10, 10000).GetValueOrDefault(dutyNpc.Position);
+                    AutoStatus = "Moving to Diadem NPC...";
+                    var point = VNavmesh.Query.Mesh.NearestPoint(dutyNpc.Position, 10, 10000);
                     if (CurrentDestination != point || (!isPathing && !isPathGenerating))
                     {
                         Navigate(point, false);
                     }
                     return;
                 }
-                else if (dutyNpc != null)
+                else
                     switch (Dalamud.Conditions[ConditionFlag.OccupiedInQuestEvent])
                     {
                         case false when contentsFinderConfirmAddon > 0:
                         {
                             var contents = new AddonMaster.ContentsFinderConfirm(contentsFinderConfirmAddon);
-                            contents.Commence();
-                            TaskManager.DelayNext(500);
+                            TaskManager.Enqueue(contents.Commence);
                             TaskManager.Enqueue(() => _diademQueuingInProgress = false);
                             TaskManager.Enqueue(() => Dalamud.Conditions[ConditionFlag.BoundByDuty]);
                             return;
@@ -1136,113 +1070,208 @@ namespace GatherBuddy.AutoGather
                     }
             }
 
-            if (territoryId != Diadem.Territory.Id && territoryId != 886 && next.Location.Territory == Diadem.Territory && Lifestream.Enabled)
-            {
-                if (!Lifestream.IsBusy())
-                {
-                    AutoStatus = "传送中...";
-                    StopNavigation();
-                    TaskManager.Enqueue(() => Lifestream.ExecuteCommand("firmament"));
-                    TaskManager.Enqueue(() => !Lifestream.IsBusy(), 30000);
-                }
-                return;
-            }
-
             var forcedAetheryte = ForcedAetherytes.ZonesWithoutAetherytes
-                .FirstOrDefault(z => z.ZoneId == next.Location.Territory.Id);
+                .FirstOrDefault(z => z.ZoneId == next.First().Location.Territory.Id);
             if (forcedAetheryte.ZoneId != 0
              && GatherBuddy.GameData.Aetherytes[forcedAetheryte.AetheryteId].Territory.Id == territoryId)
             {
                 var needsLifestream = territoryId == 478 || territoryId == 129 || territoryId == 128 || territoryId == 132 || territoryId == 133 || territoryId == 130 || territoryId == 131;
                 if (needsLifestream && !Lifestream.Enabled)
-                    AutoStatus = $"安装 Lifestream 或手动传送到 {next.Location.Territory.Name}";
+                    AutoStatus = $"Install Lifestream or teleport to {next.First().Location.Territory.Name} manually";
                 else
-                    AutoStatus = "需要手动传送";
+                    AutoStatus = "Manual teleporting required";
                 return;
             }
             
             var housingWardTerritoriesCheck = new uint[] { 339, 340, 341, 649, 641 };
             if (housingWardTerritoriesCheck.Contains((uint)targetTerritoryId) && !Lifestream.Enabled)
             {
-                AutoStatus = "安装 Lifestream 以进入房区";
+                AutoStatus = "Install Lifestream to access housing wards";
                 return;
             }
 
-            // At this point, we are definitely going to gather something, so we may go home after that.
+            //At this point, we are definitely going to gather something, so we may go home after that.
             if (Lifestream.Enabled)
                 Lifestream.Abort();
-
             WentHome = false;
+            
+            var isTimedNode = next.First().Node?.Times.AlwaysUp() == false;
+            if (!isTimedNode && next.First().Location.Territory.Id == territoryId)
+            {
+                _lastNonTimedNodeTerritory = territoryId;
+            }
+
+            
+            // fuck Diadem. Covering all zoneIDs for Diadem to gather g2/3/4.
+            var isCurrentDiadem = territoryId is 901 or 929 or 939;
+            var isTargetDiadem = next.First().Location.Territory.Id is 901 or 929 or 939;
             
             var isInSameCityPair = (territoryId is 128 or 129 && targetTerritoryId is 128 or 129)
                                 || (territoryId is 132 or 133 && targetTerritoryId is 132 or 133)
                                 || (territoryId is 130 or 131 && targetTerritoryId is 130 or 131);
-
-            if (next.Location.Territory.Id != territoryId && !isInSameCityPair)
+            
+            if (next.First().Location.Territory.Id != territoryId && !(isCurrentDiadem && isTargetDiadem) && !isInSameCityPair)
             {
-                if (Dalamud.Conditions[ConditionFlag.BoundByDuty] && !Diadem.IsInside)
+                if (GatherBuddy.Config.AutoGatherConfig.SortingMethod == AutoGatherConfig.SortingType.Location)
                 {
-                    AutoStatus = "处于任务状态中无法传送";
-                    return;
+                    var nextIsTimedNode = next.First().Node?.Times.AlwaysUp() == false;
+                    
+                    if (!nextIsTimedNode)
+                    {
+                        if (_lastNonTimedNodeTerritory != 0 && _lastNonTimedNodeTerritory != territoryId)
+                        {
+                            var itemsInPreviousZone = _activeItemList
+                                .Where(i => i.Node?.Territory.Id == _lastNonTimedNodeTerritory)
+                                .Where(i => i.Node?.Times.AlwaysUp() != false)
+                                .ToList();
+                            
+                            if (itemsInPreviousZone.Any())
+                            {
+                                var previousZoneItem = itemsInPreviousZone.First();
+                                if (!LocationMatchesJob(previousZoneItem.Location))
+                                {
+                                    if (ChangeGearSet(previousZoneItem.Location.GatheringType.ToGroup(), 2400))
+                                    {
+                                        return;
+                                    }
+                                }
+                                
+                                StopNavigation();
+                                if (!MoveToTerritory(previousZoneItem.Location))
+                                    AbortAutoGather();
+                                return;
+                            }
+                        }
+                        
+                        var itemsInCurrentZone = _activeItemList
+                            .Where(i => i.Node?.Territory.Id == territoryId)
+                            .Where(i => i.Node?.Times.AlwaysUp() != false)
+                            .ToList();
+                        
+                        if (itemsInCurrentZone.Any())
+                        {
+                            var currentZoneItem = itemsInCurrentZone.First();
+                            if (!LocationMatchesJob(currentZoneItem.Location))
+                            {
+                                if (ChangeGearSet(currentZoneItem.Location.GatheringType.ToGroup(), 2400))
+                                {
+                                    return;
+                                }
+                            }
+                            else
+                            {
+                                return;
+                            }
+                        }
+                    }
                 }
-                else if (Diadem.IsInside)
-                { 
-                    LeaveTheDiadem();
-                    return;
-                }
-
-                if (Dalamud.Conditions[ConditionFlag.Gathering]
-                 || Dalamud.Conditions[ConditionFlag.ExecutingGatheringAction]
-                 || Dalamud.Conditions[ConditionFlag.Occupied]
-                 || Dalamud.Conditions[ConditionFlag.Fishing]
-                 || Dalamud.Conditions[ConditionFlag.Casting]
-                 || Dalamud.Conditions[ConditionFlag.Mounting]
-                 || Dalamud.Conditions[ConditionFlag.Mounting71])
+                
+                if (Dalamud.Conditions[ConditionFlag.BoundByDuty] && !Functions.InTheDiadem())
                 {
-                    AutoStatus = "正在等待当前技能完成以准备传送...";
+                    AutoStatus = "Can not teleport when bound by duty";
                     return;
                 }
-
-                if (TaskManager.IsBusy)
+                else if (Functions.InTheDiadem())
                 {
-                    AutoStatus = "正在等待当前任务完成以准备传送...";
-                    return;
+                    // Check if we're waiting for umbral weather - if so, don't leave due to territory mismatch
+                    var currentWeather = EnhancedCurrentWeather.GetCurrentWeatherId();
+                    var isUmbralWeather = UmbralNodes.IsUmbralWeather(currentWeather);
+                    var hasUmbralItems = next.Any(target => target.Gatherable != null && 
+                        UmbralNodes.UmbralNodeData.Any(entry => entry.ItemIds.Contains(target.Gatherable.ItemId)));
+                    
+                    if (!isUmbralWeather && hasUmbralItems)
+                    {
+                        // We're waiting for umbral weather - don't leave due to territory mismatch
+                        // Also reset session flag in case it wasn't reset in DoNodeMovementDiadem
+                        _hasGatheredUmbralThisSession = false;
+                        AutoStatus = "Waiting in Diadem for next umbral weather...";
+                        return;
+                    }
+                    else
+                    {
+                        LeaveTheDiadem();
+                        return;
+                    }
                 }
 
-                if (Environment.TickCount64 - _lastNodeInteractionTime < 5000)
-                {
-                    AutoStatus = "正在等待附近采集点交互后准备传送...";
-                    return;
-                }
+            if (Dalamud.Conditions[ConditionFlag.Gathering] 
+             || Dalamud.Conditions[ConditionFlag.ExecutingGatheringAction]
+             || Svc.Condition[ConditionFlag.Occupied]
+             || Svc.Condition[ConditionFlag.Fishing]
+             || Svc.Condition[ConditionFlag.Casting]
+             || Svc.Condition[ConditionFlag.Mounting]
+             || Svc.Condition[ConditionFlag.Mounting71])
+            {
+                AutoStatus = "Waiting for current action to complete before teleport...";
+                return;
+            }
 
-                AutoStatus = "传送中...";
-                StopNavigation();
+            if (TaskManager.IsBusy)
+            {
+                AutoStatus = "Waiting for current tasks to complete before teleport...";
+                return;
+            }
 
-                if (!MoveToTerritory(next.Location))
-                    AbortAutoGather();
+            if (Environment.TickCount64 - _lastNodeInteractionTime < 5000)
+            {
+                AutoStatus = "Waiting after recent node interaction before teleport...";
+                return;
+            }
+
+            AutoStatus = "Teleporting...";
+            StopNavigation();
+
+            if (!MoveToTerritory(next.First().Location))
+                AbortAutoGather();
+
+                // Reset target to pick up closest item after teleport
+                next = default;
 
                 return;
             }
 
-            var targetGatheringType = next.Location.GatheringType.ToGroup();
+            var targetGatheringType = next.First().Location.GatheringType.ToGroup();
             
-            var config = next.Fish != null
-                ? MatchConfigPreset(next.Fish)
-                : MatchConfigPreset(next.Gatherable);
+            var config = MatchConfigPreset(next.First().Gatherable);
 
             if (DoUseConsumablesWithoutCastTime(config))
                 return;
-
-            if (JobAsGatheringType != targetGatheringType)
+            var firstItem = next.First().Gatherable;
+            
+            if (firstItem != null && UmbralNodes.UmbralNodeData.Any(entry => entry.ItemIds.Contains(firstItem.ItemId)))
+            {
+                var currentWeather = EnhancedCurrentWeather.GetCurrentWeatherId();
+                if (UmbralNodes.IsUmbralWeather(currentWeather))
+                {
+                    var umbralWeather = (UmbralNodes.UmbralWeatherType)currentWeather;
+                    targetGatheringType = umbralWeather switch
+                    {
+                        UmbralNodes.UmbralWeatherType.UmbralFlare => GatheringType.Miner,
+                        UmbralNodes.UmbralWeatherType.UmbralLevin => GatheringType.Miner,
+                        UmbralNodes.UmbralWeatherType.UmbralDuststorms => GatheringType.Botanist,
+                        UmbralNodes.UmbralWeatherType.UmbralTempest => GatheringType.Botanist,
+                        _ => targetGatheringType
+                    };
+                }
+            }
+            
+            var shouldSkipJobSwitch = Functions.InTheDiadem() && _hasGatheredUmbralThisSession;
+            
+            if (shouldSkipJobSwitch)
+            {
+                Svc.Log.Information($"[Umbral] Skipping job switch in Diadem after umbral gathering (staying on {JobAsGatheringType})");
+            }
+            
+            if (JobAsGatheringType != targetGatheringType && !shouldSkipJobSwitch)
             {
                 if (!ChangeGearSet(targetGatheringType, 2400))
                     AbortAutoGather();
                 return;
             }
 
-            if (next.Fish != null)
+            if (next.First().Fish != null)
             {
-                if (next.FishingSpot?.Spearfishing == true)
+                if (next.First().FishingSpot?.Spearfishing == true)
                 {
                     DoNodeMovement(next, config);
                     return;
@@ -1253,40 +1282,96 @@ namespace GatherBuddy.AutoGather
             }
 
             
-            if (next.Gatherable != null)
+            if (next.First().Gatherable != null)
             {
                 DoNodeMovement(next, config);
                 return;
             }
 
-            AutoStatus = "意外脱离循环控制, 请报告此错误";
+            AutoStatus = "Fell out of control loop unexpectedly. Please report this error.";
             return;
         }
 
         public readonly Dictionary<GatherTarget, (Vector3 Position, Angle Rotation, DateTime Expiration)> FishingSpotData = new();
         private readonly Dictionary<Vector3, DateTime> _fishingSpotDismountAttempts = new();
 
-        private void DoFishMovement(GatherTarget next)
+        private void DoFishMovement(IEnumerable<GatherTarget> next)
         {
-            Debug.Assert(next.Fish != null);
-            Debug.Assert(next.FishingSpot != null);
-
-            var fish = next;
-            var territoryId = Dalamud.ClientState.TerritoryType;
+            var fish = next.First(ne => ne.Fish != null);
+            var territoryId = Svc.ClientState.TerritoryType;
+            var isCurrentDiadem = territoryId is 901 or 929 or 939;
+            var isTargetDiadem = fish.FishingSpot?.Territory.Id is 901 or 929 or 939;
             
             var isPathGenerating = IsPathGenerating;
             var isPathing = IsPathing;
-
-            if (!FishingSpotData.TryGetValue(fish, out var fishingSpotData))
+            
+            var targetFishTerritoryId = fish.FishingSpot?.Territory.Id ?? 0;
+            var housingWardTerritoriesFish = new uint[] { 339, 340, 341, 649, 641 };
+            var isTargetHousingWard = housingWardTerritoriesFish.Contains((uint)targetFishTerritoryId);
+            
+            if (isTargetHousingWard && Lifestream.Enabled)
             {
-                var existingEntryForSameSpot = FishingSpotData
-                    .FirstOrDefault(kvp => kvp.Key.FishingSpot?.Id == fish.FishingSpot?.Id);
-
-                if (existingEntryForSameSpot.Key.Fish != null)
+                var canAccessFromCurrentTerritory = (territoryId == 129 && targetFishTerritoryId == 339)  // Limsa -> Mist
+                                                  || (territoryId is 130 or 131 && targetFishTerritoryId == 341)  // Ul'dah -> Goblet
+                                                  || (territoryId == 132 && targetFishTerritoryId == 340)  // Gridania -> Lavender
+                                                  || (territoryId == 418 && targetFishTerritoryId == 649)  // Foundation -> Empyreum
+                                                  || (territoryId == 628 && targetFishTerritoryId == 641); // Kugane -> Shirogane
+                
+                if (canAccessFromCurrentTerritory)
                 {
-                    GatherBuddy.Log.Information($"[AutoGather] 为相同钓场重复使用位置 (从 {existingEntryForSameSpot.Key.Fish.Name[GatherBuddy.Language]} 切换到 {fish.Fish!.Name[GatherBuddy.Language]})");
-                    FishingSpotData.Add(fish, existingEntryForSameSpot.Value);
-
+                    if (!Lifestream.IsBusy())
+                    {
+                        if (IsFishing)
+                        {
+                            if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
+                            {
+                                AutoHook.SetPluginState?.Invoke(false);
+                                AutoHook.SetAutoStartFishing?.Invoke(false);
+                            }
+                            AutoStatus = "Closing fishing before teleport...";
+                            QueueQuitFishingTasks();
+                            return;
+                        }
+                        
+                        AutoStatus = "Teleporting to housing ward...";
+                        StopNavigation();
+                        
+                        string wardCommand = targetFishTerritoryId switch
+                        {
+                            339 => "mist 1 1",
+                            341 => "goblet 1 1",
+                            340 => "lavender 1 1",
+                            649 => "empyreum 1 1",
+                            641 => "shirogane 1 1",
+                            _ => ""
+                        };
+                        
+                        if (!string.IsNullOrEmpty(wardCommand))
+                        {
+                            TaskManager.Enqueue(() => Lifestream.ExecuteCommand(wardCommand));
+                            TaskManager.DelayNext(1000);
+                            TaskManager.Enqueue(() => GenericHelpers.IsScreenReady());
+                        }
+                    }
+                    
+                    return;
+                }
+            }
+            
+            if (territoryId == 418 && fish.FishingSpot?.Territory.Id is 901 or 929 or 939 && Lifestream.Enabled)
+            {
+                var aetheryte = Svc.Objects.Where(x => x.ObjectKind == ObjectKind.Aetheryte && x.IsTargetable)
+                    .OrderBy(x => x.Position.DistanceToPlayer()).FirstOrDefault();
+                if (aetheryte != null)
+                {
+                    if (aetheryte.Position.DistanceToPlayer() > 10)
+                    {
+                        AutoStatus = "Moving to aetheryte...";
+                        if (!isPathing && !isPathGenerating)
+                            Navigate(aetheryte.Position, false);
+                    }
+                    else if (!Lifestream.IsBusy())
+                    {
                     if (IsFishing)
                     {
                         if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
@@ -1294,251 +1379,169 @@ namespace GatherBuddy.AutoGather
                             AutoHook.SetPluginState?.Invoke(false);
                             AutoHook.SetAutoStartFishing?.Invoke(false);
                         }
-                        AutoStatus = "正在停止钓鱼以更换目标...";
+                        AutoStatus = "Closing fishing before teleport...";
                         QueueQuitFishingTasks();
+                        return;
+                    }
+                        AutoStatus = "Teleporting...";
+                        StopNavigation();
+                        string name = Dalamud.GameData.GetExcelSheet<TerritoryType>().GetRow(886).PlaceName.Value.Name.ToString()
+                            .Split(" ")[1];
+
+                        TaskManager.Enqueue(() => Lifestream.AethernetTeleport(name));
+                        TaskManager.DelayNext(1000);
+                        TaskManager.Enqueue(() => GenericHelpers.IsScreenReady());
                     }
 
                     return;
                 }
-
-                if (IsFishing)
-                {
-                    if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
-                    {
-                        AutoHook.SetPluginState?.Invoke(false);
-                        AutoHook.SetAutoStartFishing?.Invoke(false);
-                    }
-                    AutoStatus = "正在停止钓鱼以更换目标...";
-                    QueueQuitFishingTasks();
-                    return;
-                }
-
-                var positionData = _plugin.FishRecorder.GetPositionForFishingSpot(fish!.FishingSpot);
-                if (!positionData.HasValue)
-                {
-                    Communicator.PrintError(
-                        $"缺少钓场的位置信息: {fish.FishingSpot.Name}, 自动钓鱼无法继续. 至少在 \"{fish.FishingSpot.Name}\" 手动钓一次, 以便 GBR 获取位置");
-                    AbortAutoGather();
-                    return;
-                }
-
-                FishingSpotData.Add(fish, (positionData.Value.Position, positionData.Value.Rotation, DateTime.MaxValue));
-                return;
             }
-
-            if (next.Fish.UmbralWeather.IsUmbral)
+            
+            if (fish.FishingSpot?.Territory.Id != territoryId && !(isCurrentDiadem && isTargetDiadem))
             {
-                var currentWeather = EnhancedCurrentWeather.GetCurrentWeatherId();
-                if (next.Fish.UmbralWeather.Id != currentWeather)
+                if (Dalamud.Conditions[ConditionFlag.BoundByDuty] && !Functions.InTheDiadem())
                 {
-                    if (IsGathering)
+                    AutoStatus = "Can not teleport when bound by duty";
+                    return;
+                }
+                else if (Functions.InTheDiadem())
+                {
+                    LeaveTheDiadem();
+                    return;
+                }
+                
+                if (territoryId == 886 && fish.FishingSpot?.Territory.Id is 901 or 929 or 939)
+                {
+                    if (JobAsGatheringType == GatheringType.Unknown)
                     {
-                        if (IsFishing && AutoHook.Enabled)
+                        if (ChangeGearSet(GatheringType.Fisher, 2400))
                         {
-                            AutoHook.SetAutoStartFishing(false);
+                            return;
                         }
                         else
                         {
-                            CleanupAutoHook();
-                            QueueQuitFishingTasks();
-                        }
-                    }
-                    else
-                    {
-                        AutoStatus = "正在等待正确的云冠群岛灵风天气";
-                    }
-
-                    return;
-                }
-            }
-
-            if (IsFishing)
-            {
-                if (GatherBuddy.Config.AutoGatherConfig.MaxFishingSpotMinutes > 0)
-                {
-                    GatherBuddy.Log.Verbose($"[AutoGather] IsFishing 区块已进入, 将检查计时器. MaxFishingSpotMinutes={GatherBuddy.Config.AutoGatherConfig.MaxFishingSpotMinutes}, 过期时间={fishingSpotData.Expiration}");
-                }
-                if (_fishWaryDetected) // 钓点警惕 (真警惕), 无法抛竿, 同钓场更换位置
-                {
-                    _fishWaryDetected = false;
-                    _processingFishingToast = true;
-                    GatherBuddy.Log.Information($"[AutoGather] 鱼类警惕警告 - 执行简单重新定位 (不计入脱钩)...");
-                    
-                    var oldPosition = fishingSpotData.Position;
-                    const float MinRelocationDistance = 10.0f;
-                    var positionData = _plugin.FishRecorder.GetPositionForFishingSpot(
-                        fish!.FishingSpot,
-                        oldPosition,
-                        MinRelocationDistance);
-
-                    if (positionData.HasValue)
-                    {
-                        var newPos = positionData.Value.Position;
-                        var newRot = positionData.Value.Rotation;
-                        var dist = Vector3.Distance(newPos, oldPosition);
-
-                        GatherBuddy.Log.Information($"[AutoGather] 警惕重新定位: {oldPosition} → {newPos}, 距离={dist}y");
-                        FishingSpotData[fish] = (newPos, newRot, DateTime.MaxValue);
-                        
-                        if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
-                        {
-                            AutoHook.SetPluginState?.Invoke(false);
-                            AutoHook.SetAutoStartFishing?.Invoke(false);
-                        }
-                        
-                        AutoStatus = "钓点警惕 - 正在重新调整位置...";
-                        QueueQuitFishingTasks();
-                        
-                        TaskManager.Enqueue(() =>
-                        {
-                            _processingFishingToast = false;
-                GatherBuddy.Log.Debug("[AutoGather] 警惕处理完成, 已准备好接收新提示");
-                            return true;
-                        });
-                    }
-                    else
-                    {
-                        _processingFishingToast = false;
-                        GatherBuddy.Log.Warning("[AutoGather] 没有用于警惕重新定位的备用位置, 继续...");
-                    }
-                    
-                    return;
-                }
-                
-                if (_fishDetectedPlayer) // 假警惕, 还能抛竿
-                {
-                    _fishDetectedPlayer = false;
-                    _processingFishingToast = true;
-
-                    if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
-                    {
-                        AutoHook.SetPluginState?.Invoke(false);
-                        AutoHook.SetAutoStartFishing?.Invoke(false);
-                    }
-                    
-                    if (_consecutiveAmissCount == 1)
-                    {
-                        GatherBuddy.Log.Warning($"[AutoGather] 首次脱钩检测 - 在钓点内重新定位...");
-                        var oldPosition = fishingSpotData.Position;
-
-                        const float MinRelocationDistance = 10.0f;
-                        var positionData = _plugin.FishRecorder.GetPositionForFishingSpot(
-                            fish!.FishingSpot,
-                            oldPosition,
-                            MinRelocationDistance);
-
-                        if (!positionData.HasValue)
-                        {
-                            _processingFishingToast = false;
-                            Communicator.PrintError(
-                                $"缺少钓场的备用位置数据: {fish.FishingSpot.Name}. 自动钓鱼无法继续");
                             AbortAutoGather();
                             return;
                         }
-
-                        var newPos = positionData.Value.Position;
-                        var newRot = positionData.Value.Rotation;
-                        var dist = Vector3.Distance(newPos, oldPosition);
-
-                        GatherBuddy.Log.Information($"[AutoGather] 在 '{fish.FishingSpot.Name}' 钓场内重新定位, " +
-                                      $"从 {oldPosition} 到 {newPos}, 距离={dist}y");
-
-                        FishingSpotData[fish] = (newPos, newRot, DateTime.MaxValue);
-                        
-                        AutoStatus = "鱼类警惕! 正在重新调整位置并等待 30 秒...";
-                        QueueQuitFishingTasks();
-                        
-                        TaskManager.DelayNext(30000);
-                        TaskManager.Enqueue(() => 
-                        {
-                            _processingFishingToast = false;
-                            GatherBuddy.Log.Information("[AutoGather] 等待完成, 恢复钓鱼...");
-                            return true;
-                        });
-                    }
-                    else
-                    {
-                        GatherBuddy.Log.Warning($"[AutoGather] 持续脱钩 (次数: {_consecutiveAmissCount}) - 正在传送出地图以清除状态...");
-                        
-                        AutoStatus = "鱼类持续警惕! 正在传送离开地图以重置状态...";
-                        QueueQuitFishingTasks();
-                        
-                        TaskManager.Enqueue(() => 
-                        {
-                            var wentHome = GoHome();
-                            if (wentHome)
-                            {
-                                GatherBuddy.Log.Information("[AutoGather] 已传送回家. 等待后返回钓场...");
-                            }
-                            else
-                            {
-                                GatherBuddy.Log.Warning("[AutoGather] 无法传送回家 (Lifestream 不可用?). 在当前地点等待...");
-                            }
-                            return true;
-                        });
-                        
-                        TaskManager.DelayNext(10000);
-                        
-                        TaskManager.Enqueue(() => 
-                        {
-                            _consecutiveAmissCount = 0;
-                            _processingFishingToast = false;
-                            WentHome = false;
-                            GatherBuddy.Log.Information("[AutoGather] 通过地图传送清除了脱钩状态. 正在返回钓场...");
-                            AutoStatus = "正在返回钓点...";
-                            return true;
-                        });
                     }
                     
-                    return;
-                }
-                
-                if (GatherBuddy.Config.AutoGatherConfig.MaxFishingSpotMinutes > 0 && fishingSpotData.Expiration < DateTime.Now)
-                {
-                    GatherBuddy.Log.Information($"[AutoGather] 钓场计时器过期 ({GatherBuddy.Config.AutoGatherConfig.MaxFishingSpotMinutes} 分钟), 正在重新定位...");
-                    var oldPosition = fishingSpotData.Position;
-
-                    const float MinRelocationDistance = 10.0f;
-                    var positionData = _plugin.FishRecorder.GetPositionForFishingSpot(
-                        fish!.FishingSpot,
-                        oldPosition,
-                        MinRelocationDistance);
-
-                    if (!positionData.HasValue)
+                    var dutyNpc                    = Svc.Objects.FirstOrDefault(o => o.DataId == 1031694);
+                    var selectStringAddon          = Dalamud.GameGui.GetAddonByName("SelectString");
+                    var talkAddon                  = Dalamud.GameGui.GetAddonByName("Talk");
+                    var selectYesNoAddon           = Dalamud.GameGui.GetAddonByName("SelectYesno");
+                    var contentsFinderConfirmAddon = Dalamud.GameGui.GetAddonByName("ContentsFinderConfirm");
+                    
+                    if (dutyNpc != null && dutyNpc.Position.DistanceToPlayer() > 3)
                     {
-                        Communicator.PrintError(
-                            $"缺少钓场的备用位置数据: {fish.FishingSpot.Name}. 自动钓鱼无法继续");
-                        AbortAutoGather();
+                        AutoStatus = "Moving to Diadem NPC...";
+                        var point = VNavmesh.Query.Mesh.NearestPoint(dutyNpc.Position, 10, 10000);
+                        if (CurrentDestination != point || (!IsPathGenerating && !IsPathing))
+                        {
+                            Navigate(point, false);
+                        }
                         return;
                     }
+                    else
+                        switch (Dalamud.Conditions[ConditionFlag.OccupiedInQuestEvent])
+                        {
+                            case false when contentsFinderConfirmAddon > 0:
+                            {
+                                var contents = new AddonMaster.ContentsFinderConfirm(contentsFinderConfirmAddon);
+                                TaskManager.Enqueue(contents.Commence);
+                                TaskManager.Enqueue(() => _diademQueuingInProgress = false);
+                                TaskManager.Enqueue(() => Dalamud.Conditions[ConditionFlag.BoundByDuty]);
+                                return;
+                            }
+                            case false when contentsFinderConfirmAddon == nint.Zero
+                             && selectStringAddon == nint.Zero
+                             && selectYesNoAddon == nint.Zero:
+                                unsafe
+                                {
+                                    var targetSystem = TargetSystem.Instance();
+                                    if (targetSystem == null)
+                                        return;
 
-                    var newPos = positionData.Value.Position;
-                    var newRot = positionData.Value.Rotation;
-                    var dist = Vector3.Distance(newPos, oldPosition);
-
-                    GatherBuddy.Log.Debug($"[AutoGather] 为 '{fish.FishingSpot.Name}' 重新定位钓场, " +
-                                  $"从 {oldPosition} 到 {newPos}, 距离={dist}");
-
-                    FishingSpotData[fish] = (newPos, newRot, DateTime.MaxValue);
-
-                    if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
-                    {
-                        AutoHook.SetPluginState?.Invoke(false);
-                        AutoHook.SetAutoStartFishing?.Invoke(false);
-                    }
-                    
-                    AutoStatus = "正在停止钓鱼以前往新的钓点...";
-                    QueueQuitFishingTasks();
-                    return;
+                                    TaskManager.Enqueue(StopNavigation);
+                                    TaskManager.Enqueue(()
+                                        => targetSystem->OpenObjectInteraction(
+                                            (FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)dutyNpc.Address));
+                                    TaskManager.Enqueue(() => Dalamud.Conditions[ConditionFlag.OccupiedInQuestEvent]);
+                                    TaskManager.Enqueue(() => _diademQueuingInProgress = true);
+                                    return;
+                                }
+                            case true when selectStringAddon > 0:
+                            {
+                                var select = new AddonMaster.SelectString(selectStringAddon);
+                                TaskManager.Enqueue(() => select.Entries[0].Select());
+                                return;
+                            }
+                            case true when selectYesNoAddon > 0:
+                            {
+                                var yesNo = new AddonMaster.SelectYesno(selectYesNoAddon);
+                                TaskManager.Enqueue(yesNo.Yes);
+                                TaskManager.DelayNext(5000);
+                                return;
+                            }
+                            case true when talkAddon > 0:
+                            {
+                                var talk = new AddonMaster.Talk(talkAddon);
+                                TaskManager.Enqueue(talk.Click);
+                                return;
+                            }
+                        }
                 }
                 
-                DoFishingTasks(next);
+            if (IsFishing)
+            {
+                if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
+                {
+                    AutoHook.SetPluginState?.Invoke(false);
+                    AutoHook.SetAutoStartFishing?.Invoke(false);
+                }
+                AutoStatus = "Closing fishing before teleport...";
+                QueueQuitFishingTasks();
+                return;
+            }
+                
+                AutoStatus = "Teleporting...";
+                StopNavigation();
+                
+                if (!MoveToTerritory(fish.Location))
+                    AbortAutoGather();
+                
+                return;
+            }
+
+        if (!FishingSpotData.TryGetValue(fish, out var fishingSpotData))
+        {
+            if (IsFishing)
+            {
+                if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
+                {
+                    AutoHook.SetPluginState?.Invoke(false);
+                    AutoHook.SetAutoStartFishing?.Invoke(false);
+                }
+                AutoStatus = "Stopping fishing to change target...";
+                QueueQuitFishingTasks();
                 return;
             }
             
-            if (GatherBuddy.Config.AutoGatherConfig.MaxFishingSpotMinutes > 0 && fishingSpotData.Expiration < DateTime.Now)
+            var positionData = _plugin.FishRecorder.GetPositionForFishingSpot(fish!.FishingSpot);
+            if (!positionData.HasValue)
             {
-            GatherBuddy.Log.Debug("[AutoGather] 是时候换新钓场了!");
+                Communicator.PrintError(
+                    $"No position data for fishing spot {fish.FishingSpot.Name}. Auto-Fishing cannot continue. Please, manually fish at least once at {fish.FishingSpot.Name} so GBR can know its location.");
+                AbortAutoGather();
+                return;
+            }
+
+            FishingSpotData.Add(fish, (positionData.Value.Position, positionData.Value.Rotation, DateTime.MaxValue));
+            return;
+        }
+
+            if (fishingSpotData.Expiration < DateTime.Now)
+            {
+                Svc.Log.Debug("[AutoGather] Time for a new fishing spot!");
                 var oldPosition = fishingSpotData.Position;
 
                 const float MinRelocationDistance = 10.0f;
@@ -1550,7 +1553,7 @@ namespace GatherBuddy.AutoGather
                 if (!positionData.HasValue)
                 {
                     Communicator.PrintError(
-                        $"缺少钓鱼地点的备用位置数据: {fish.FishingSpot.Name}. 自动钓鱼无法继续。");
+                        $"No alternate position data for fishing spot {fish.FishingSpot.Name}. Auto-Fishing cannot continue.");
                     AbortAutoGather();
                     return;
                 }
@@ -1559,13 +1562,28 @@ namespace GatherBuddy.AutoGather
                 var newRot = positionData.Value.Rotation;
                 var dist = Vector3.Distance(newPos, oldPosition);
 
-                GatherBuddy.Log.Debug($"[AutoGather] 为 '{fish.FishingSpot.Name}' 重新定位钓场, " +
-                              $"从 {oldPosition} 到 {newPos}, 距离={dist}");
+                Svc.Log.Debug($"[AutoGather] Relocating fishing spot for '{fish.FishingSpot.Name}' " +
+                              $"from {oldPosition} to {newPos}, distance={dist}");
 
                 FishingSpotData[fish] = (newPos, newRot, DateTime.MaxValue);
 
-                AutoStatus = "正在移动至新的钓场...";
+                if (IsGathering || IsFishing)
+                {
+                    AutoStatus = "Stopping fishing to relocate to new spot...";
+                    QueueQuitFishingTasks();
+                    return;
+                }
+
+                AutoStatus = "Moving to new fishing spot...";
                 MoveToFishingSpot(newPos, newRot);
+                return;
+            }
+
+            if (IsFishing)
+            {
+                StopNavigation();
+                AutoStatus = "Fishing...";
+                DoFishingTasks(next);
                 return;
             }
 
@@ -1579,15 +1597,15 @@ namespace GatherBuddy.AutoGather
                     }
                     else if ((DateTime.Now - firstAttempt).TotalSeconds > 5)
                     {
-                        GatherBuddy.Log.Warning("[AutoGather] 在钓场下坐骑超过 5 秒失败, 强制脱困以寻找可降落位置");
+                        Svc.Log.Warning("[AutoGather] Failed to dismount at fishing spot for 5+ seconds, forcing unstuck to find landable spot");
                         _fishingSpotDismountAttempts.Remove(fishingSpotData.Position);
                         _advancedUnstuck.ForceFishing();
-                        AutoStatus = "无法降落在此处, 寻找可降落位置...";
+                        AutoStatus = "Can't land here, finding landable spot...";
                         return;
                     }
                     
-                    EnqueueDismountFisher(); // 更改为钓鱼下坐骑版本, 防止自动前进失位
-                    AutoStatus = "正在下坐骑...";
+                    EnqueueDismount();
+                    AutoStatus = "Dismounting...";
                     return;
                 }
                 
@@ -1600,124 +1618,31 @@ namespace GatherBuddy.AutoGather
                 if (playerAngle != fishingSpotData.Rotation)
                 {
                     TaskManager.Enqueue(() => SetRotation(fishingSpotData.Rotation));
-                    _fishingSpotArrivalTime.Remove(fish);
-                    AutoStatus = "正在调整角色面向...";
+                    AutoStatus = "Adjusting rotation...";
                     return;
                 }
 
-                if (TaskManager.IsBusy)
-                {
-                    AutoStatus = "正在等待角色面向...";
-                    return;
-                }
-
-                if (!_fishingSpotArrivalTime.ContainsKey(fish))
-                {
-                    _fishingSpotArrivalTime[fish] = DateTime.Now;
-                }
-                
-                var timeSinceArrival = (DateTime.Now - _fishingSpotArrivalTime[fish]).TotalSeconds;
-                if (timeSinceArrival < 1.0)
-                {
-                    AutoStatus = $"等待进行抛竿检查 ({1.0 - timeSinceArrival:F1}s)...";
-                    return;
-                }
-
-                if (fishingSpotData.Expiration == DateTime.MaxValue && GatherBuddy.Config.AutoGatherConfig.MaxFishingSpotMinutes > 0)
+                if (fishingSpotData.Expiration == DateTime.MaxValue)
                 {
                     var newExpiration = DateTime.Now.AddMinutes(GatherBuddy.Config.AutoGatherConfig.MaxFishingSpotMinutes);
                     FishingSpotData[fish] = (fishingSpotData.Position, fishingSpotData.Rotation, newExpiration);
-                    GatherBuddy.Log.Information($"[AutoGather] 已启动钓场计时器: {GatherBuddy.Config.AutoGatherConfig.MaxFishingSpotMinutes} 分钟");
+                    Svc.Log.Information($"[AutoGather] Started fishing spot timer: {GatherBuddy.Config.AutoGatherConfig.MaxFishingSpotMinutes} minutes");
                 }
                 else
                 {
-                    GatherBuddy.Log.Debug($"钓场有效时间为 {(fishingSpotData.Expiration - DateTime.Now).TotalSeconds:F0} 秒");
-                }
-
-
-                uint castStatus;
-                unsafe
-                {
-                    castStatus = ActionManager.Instance()->GetActionStatus(ActionType.Action, 289);
-                }
-
-                if (castStatus != 0)
-                {
-                    GatherBuddy.Log.Debug($"[AutoGather] 抛竿动作状态为 {castStatus}, 检查是否需要微调");
-
-                    var attemptCount = _jiggleAttempts.GetValueOrDefault(fish, 0);
-                    if (attemptCount >= 3)
-                    {
-                        GatherBuddy.Log.Warning($"[AutoGather] 经过 {attemptCount} 次微调尝试后未能找到有效钓鱼位置, 强制脱困");
-                        _jiggleAttempts.Remove(fish);
-                        FishingSpotData.Remove(fish);
-                        _advancedUnstuck.ForceFishing();
-                        AutoStatus = "抖动尝试次数过多, 寻找新的钓点...";
-                        return;
-                    }
-
-                    if ((DateTime.Now - _lastJiggleTime).TotalSeconds < 5)
-                    {
-                        GatherBuddy.Log.Debug($"[AutoGather] 微调冷却中, 剩余 {5 - (DateTime.Now - _lastJiggleTime).TotalSeconds:F0} 秒");
-                        return;
-                    }
-
-                    GatherBuddy.Log.Information($"[AutoGather] 无法抛竿 (状态: {castStatus}), 尝试调整位置 (第 {attemptCount + 1}/3 次)");
-                    
-                    Vector3 newPos;
-                    Angle newRotation = fishingSpotData.Rotation;
-                    bool foundPos = false;
-
-                    var forwardDirection = new Vector3(
-                        (float)Math.Sin(Player.Rotation),
-                        0,
-                        (float)Math.Cos(Player.Rotation)
-                    );
-                    
-                    var stepSize = 1.0f;
-                    var testPos = Player.Position + forwardDirection * stepSize;
-                    var meshPoint = VNavmesh.Query.Mesh.NearestPoint(testPos, 0.5f, 1.0f);
-                    if (meshPoint.HasValue)
-                    {
-                        newPos = meshPoint.Value;
-                        foundPos = true;
-                        GatherBuddy.Log.Information($"[AutoGather] 向前方移动 {stepSize:F1}y");
-                    }
-                    else
-                    {
-                        GatherBuddy.Log.Warning("[AutoGather] 在导航网格上找不到有效的调整位置");
-                        _jiggleAttempts[fish] = attemptCount + 1;
-                        _lastJiggleTime = DateTime.Now;
-                        return;
-                    }
-
-                    _jiggleAttempts[fish] = attemptCount + 1;
-                    FishingSpotData[fish] = (newPos, newRotation, fishingSpotData.Expiration);
-                    _lastJiggleTime = DateTime.Now;
-
-                    AutoStatus = "正在为抛竿调整位置...";
-                    MoveToFishingSpot(newPos, newRotation);
-                    return;
-                }
-                else
-                {
-                    if (_jiggleAttempts.ContainsKey(fish))
-                    {
-                        GatherBuddy.Log.Information($"[AutoGather] 微调后抛竿已可用, 清除尝试计数器");
-                        _jiggleAttempts.Remove(fish);
-                    }
+                    Svc.Log.Debug($"Fishing Spot is valid for {(fishingSpotData.Expiration - DateTime.Now).TotalSeconds} seconds");
                 }
 
                 StopNavigation();
-                AutoStatus = "钓鱼中...";
+                AutoStatus = "Fishing...";
                 DoFishingTasks(next);
                 return;
             }
 
-            AutoStatus = "正在移动到钓点";
             if (CurrentDestination != fishingSpotData.Position)
             {
                 StopNavigation();
+                AutoStatus = "Moving to fishing spot...";
                 var autoHookArmed =
                     GatherBuddy.Config.AutoGatherConfig.UseAutoHook
                     && AutoHook.Enabled
@@ -1725,7 +1650,7 @@ namespace GatherBuddy.AutoGather
 
                 if (IsGathering || IsFishing || autoHookArmed)
                 {
-                    AutoStatus = "正在停止钓鱼以更换目标...";
+                    AutoStatus = "Stopping fishing to change target...";
                     QueueQuitFishingTasks();
                     return;
                 }
@@ -1734,213 +1659,284 @@ namespace GatherBuddy.AutoGather
             }
         }
 
-        private bool DoNodeMovementDiadem(GatherTarget next, ConfigPreset config)
+        private void DoNodeMovementDiadem(IEnumerable<GatherTarget> next, ConfigPreset config)
         {
-            Debug.Assert(next.Gatherable != null);
-            Debug.Assert(next.Node != null);
-
-            var player = Player.Position;
-
-            // ActiveItemsList prioritizes umbral items with matching weather,
-            // so we only need to check the first item in the list.
-            // Let the normal navigation logic handle Skybuilders' Tools quest items and Umbral nodes.
-
-            if (next.Node.NodeType == NodeType.梦幻)
+            var targetGatheringType = next.First().Location.GatheringType;
+            var currentJob = JobAsGatheringType;
+            
+            var currentWeather = EnhancedCurrentWeather.GetCurrentWeatherId();
+            var isUmbralWeather = UmbralNodes.IsUmbralWeather(currentWeather);
+            
+            var hasUmbralItems = HasUmbralItemsInActiveList();
+                
+            if (isUmbralWeather && hasUmbralItems)
             {
-                var currentWeather = EnhancedCurrentWeather.GetCurrentWeatherId();
-                if (next.Node.UmbralWeather.Id != currentWeather || _activeItemList.IsCloudedNodeConsumed)
+                var currentUmbralWeather = (UmbralNodes.UmbralWeatherType)currentWeather;
+                var relevantUmbralNodes = UmbralNodes.GetNodesForWeatherAndType(currentUmbralWeather, currentJob);
+                
+                foreach (var nodeId in relevantUmbralNodes)
                 {
-                    AutoStatus = "正在等待正确的云冠群岛灵风天气";
-                    StopNavigation();
-                    return true;
-                }
-
-                // Check if the node hasn't spawned due to a game bug.
-                var flag = TimedNodePosition;
-                var nodeId = next.Node.WorldPositions.Keys.First();
-                if (flag.HasValue && Vector2.Distance(flag.Value, player.ToVector2()) < NodeVisibilityDistance
-                    && !Dalamud.Objects.Any(o => o.ObjectKind == ObjectKind.GatheringPoint && o.IsTargetable && nodeId == o.BaseId))
-                {
-                    GatherBuddy.Log.Warning("看起来云冠群岛采集点因游戏 bug 未刷新. 尝试离开");
-
-                    // Pick a random node far away and move there.
-                    var pos = GatherBuddy.GameData.GatheringNodes.Values
-                        .Where(n => n.Territory == Diadem.Territory)
-                        .SelectMany(n => n.WorldPositions.Values)
-                        .SelectMany(x => x)
-                        .Where(pos => Vector2.DistanceSquared(pos.ToVector2(), flag.Value) > 200f * 200f)
-                        .Aggregate((Count: 0, Item: Vector3.Zero), (acc, current) => (acc.Count + 1, (Random.Shared.Next(acc.Count + 1) == 0) ? current : acc.Item))
-                        .Item;
-
-                    Navigate(pos, true, direct: true);
-                    TaskManager.Enqueue(() => !IsPathGenerating);
-                    TaskManager.Enqueue(() => !Dalamud.Objects.Any(o => o.ObjectKind == ObjectKind.GatheringPoint && nodeId == o.BaseId) || !IsPathing, 10000);
-                    TaskManager.Enqueue(StopNavigation);
-
-                    AutoStatus = "尝试重置错误的云冠群岛采集点";
-                    return true;
-                }
-                return false;
-            }
-
-            if (Diadem.OddlyDelicateItems.Contains(next.Item))
-                return false;
-
-            // For regular nodes, we go in a full circle along the pre-calculated optimal path.
-            var path = Diadem.ShortestPaths[JobAsGatheringType];
-            if (_diademPathIndex == -1)
-            {
-                // Find the closest node to start the path.
-                var closestDist = float.PositiveInfinity;
-                for (var i = 0; i < path.Length; i++)
-                {
-                    if (!_diadem.IsNodeAvailable(path[i])) continue;
-
-                    try
+                    var nodeItems = UmbralNodes.GetItemsForNode(nodeId);
+                    var hasNeededItems = GetActiveItemsNeedingGathering()
+                        .Any(item => nodeItems.Contains(item.Item.ItemId));
+                    
+                    if (hasNeededItems && GatherBuddy.GameData.WorldCoords.TryGetValue(nodeId, out var umbralPositions))
                     {
-                        var dist = Vector3.Distance(player, WorldData.WorldLocationsByNodeId[path[i]].Where(p => !IsBlacklisted(p)).Average());
-                        // If there are several close nodes within 50y of each other, pick the one with the lowest index.
-                        if (dist + 50f < closestDist)
+                        var validPositions = umbralPositions
+                            .Where(pos => !IsBlacklisted(pos))
+                            .OrderBy(pos => Vector3.Distance(Player.Position, pos))
+                            .ToList();
+                        
+                        if (validPositions.Any())
                         {
-                            closestDist = dist;
-                            _diademPathIndex = i;
+                            var targetPosition = validPositions.First();
+                            var distance = Vector3.Distance(Player.Position, targetPosition);
+                            
+                            const float CloseEnoughDistance = 50f;
+                            
+                            if (distance > CloseEnoughDistance)
+                            {
+                                AutoStatus = $"Rushing to umbral node {nodeId} (Weather: {currentUmbralWeather}, {distance:F0}y)...";
+                                
+                                if (!Dalamud.Conditions[ConditionFlag.Mounted] && distance >= GatherBuddy.Config.AutoGatherConfig.MountUpDistance)
+                                {
+                                    if (GatherBuddy.Config.AutoGatherConfig.MoveWhileMounting)
+                                        Navigate(targetPosition, false);
+                                    EnqueueMountUp();
+                                }
+                                else
+                                {
+                                    Navigate(targetPosition, ShouldFly(targetPosition));
+                                }
+                                return;
+                            }
+                            else
+                            {
+                                // Don't return - let the normal node detection logic below handle finding the actual spawned node
+                            }
                         }
                     }
-                    catch (InvalidOperationException)
-                    {
-                        continue; // Node is blacklisted
-                    }
                 }
             }
-            else
-            {
-                var prevIndex = _diademPathIndex;
-                while (!_diadem.IsNodeAvailable(path[_diademPathIndex]) || WorldData.WorldLocationsByNodeId[path[_diademPathIndex]].All(IsBlacklisted))
+            
+            const float RecentlyGatheredDistance = 5f;
+            
+            var allVisibleNodes = Svc.Objects
+                .Where(o => o.ObjectKind == ObjectKind.GatheringPoint)
+                .Where(o => !IsBlacklisted(o.Position))
+                .Where(o => !_diademRecentlyGatheredNodes.Any(recent => Vector3.Distance(recent, o.Position) < RecentlyGatheredDistance))
+                .Where(o =>
                 {
-                    _diademPathIndex = (_diademPathIndex + 1) % path.Length;
-                    if (prevIndex == _diademPathIndex)
-                        AbortAutoGather("云冠群岛所有活跃采集点均已被屏蔽");
-                }
-            }
-
-            var nextNode = Dalamud.Objects.Where(o => o.ObjectKind == ObjectKind.GatheringPoint && o.BaseId == path[_diademPathIndex] && o.IsTargetable).FirstOrDefault();
-            if (nextNode != null)
+                    if (!GatherBuddy.GameData.WorldCoords.TryGetValue(o.DataId, out _))
+                        return false;
+                    
+                    var gatheringPoint = Dalamud.GameData.GetExcelSheet<GatheringPoint>()?.GetRow(o.DataId);
+                    if (gatheringPoint == null || !gatheringPoint.HasValue)
+                        return false;
+                    
+                    var nodeBase = gatheringPoint.Value.GatheringPointBase;
+                    if (nodeBase.RowId == 0)
+                        return false;
+                    
+                    var nodeGatheringType = (GatheringType)nodeBase.Value.GatheringType.RowId;
+                    return nodeGatheringType.ToGroup() == currentJob;
+                })
+                .ToList();
+            
+            var nonUmbralNodes = allVisibleNodes
+                .Where(o => !UmbralNodes.UmbralNodeData.Any(entry => entry.NodeId == o.DataId))
+                .OrderBy(o => Vector3.Distance(Player.Position, o.Position))
+                .ToList();
+                
+            if (isUmbralWeather && hasUmbralItems)
             {
-                if (IsBlacklisted(nextNode.Position))
+                var umbralNodes = allVisibleNodes
+                    .Where(o => UmbralNodes.UmbralNodeData.Any(entry => entry.NodeId == o.DataId))
+                    .OrderBy(o => Vector3.Distance(Player.Position, o.Position))
+                    .ToList();
+                
+                if (umbralNodes.Any())
                 {
-                    _diademPathIndex = (_diademPathIndex + 1) % path.Length;
+                    allVisibleNodes = umbralNodes;
+                    AutoStatus = $"Targeting umbral nodes (Weather: {(UmbralNodes.UmbralWeatherType)currentWeather})...";
                 }
                 else
                 {
-                    AutoStatus = $"正在移动至云冠群岛采集点 ({Vector3.Distance(player, nextNode.Position):F0}y)...";
-                    var pos = nextNode.Position;
-                    if (TryWindmireJump(ref pos))
-                        Navigate(pos, ShouldFly(pos), direct: true, nodeId: nextNode.BaseId);
-                    else
-                        MoveToCloseNode(nextNode, next.Gatherable!, config);
+                    allVisibleNodes = nonUmbralNodes;
                 }
             }
             else
             {
-                var nodeId = path[_diademPathIndex];
-                var pos = WorldData.WorldLocationsByNodeId[nodeId]
-                    .OrderBy(pos => Vector3.DistanceSquared(pos, player))
-                    .First();
-
-                AutoStatus = $"正在移动至云冠群岛采集点 ({Vector3.Distance(player, pos):F0}y)...";
-
-                var jump = TryWindmireJump(ref pos);
-                Navigate(pos, ShouldFly(pos), direct: jump, nodeId: nodeId);
+                allVisibleNodes = nonUmbralNodes;
             }
-            return true;
-        }
 
-        private bool TryWindmireJump(ref Vector3 destination)
-        {
-            if (!GatherBuddy.Config.AutoGatherConfig.DiademWindmireJumps)
-                return false;
+            if (ActivateGatheringBuffs(false))
+                return;
 
-            var pos = destination;
-            var player = Player.Position;
-
-            var ((windmire, _), windmireDistance) = Diadem.Windmires
-                    .Select(w => (w, Distance: Vector3.Distance(player, w.From) + Vector3.Distance(w.To, pos)))
-                    .MinBy(x => x.Distance);
-
-            var directDistance = Vector3.Distance(player, pos);
-
-            // Use Windmire only if it provides a 2x advantage in distance.
-            if (windmireDistance * 2f < directDistance)
+            const float NearbyNodeDistance = 150f;
+            foreach (var visibleNode in allVisibleNodes.Where(node => !node.IsTargetable))
             {
-                destination = windmire;
-                return true;
+                var nodePosition = visibleNode.Position;
+                if (Vector3.Distance(Player.Position, nodePosition) < NearbyNodeDistance)
+                {
+                    if (!FarNodesSeenSoFar.Contains(nodePosition))
+                        FarNodesSeenSoFar.Add(nodePosition);
+                }
             }
-            return false;
-        }
+            
+            const int MaxSeenNodes = 100;
+            if (FarNodesSeenSoFar.Count > MaxSeenNodes)
+                FarNodesSeenSoFar.Clear();
 
-        private void DoNodeMovement(GatherTarget next, ConfigPreset config)
-        {
-            if (Diadem.IsInside)
+            var targetableNodes = allVisibleNodes.Where(o => o.IsTargetable).ToList();
+            
+            if (targetableNodes.Any())
             {
-                if (DoNodeMovementDiadem(next, config))
-                    return;
-                _diademPathIndex = -1;
+                var closestNode = targetableNodes.First();
+                var distance = Vector3.Distance(Player.Position, closestNode.Position);
+                
+                AutoStatus = $"Moving to Diadem node ({distance:F0}y)...";
+                
+                Gatherable targetItem;
+                if (isUmbralWeather && hasUmbralItems && UmbralNodes.UmbralNodeData.Any(entry => entry.NodeId == closestNode.DataId))
+                {
+                    var currentUmbralWeather = (UmbralNodes.UmbralWeatherType)currentWeather;
+                    var matchingUmbralItem = next
+                        .Where(target => target.Gatherable != null)
+                        .Where(target => UmbralNodes.UmbralNodeData.Any(entry => entry.ItemIds.Contains(target.Gatherable.ItemId) && 
+                                                                                entry.Weather == currentUmbralWeather &&
+                                                                                UmbralNodes.GetGatheringType(entry.NodeType) == currentJob))
+                        .Select(target => target.Gatherable)
+                        .FirstOrDefault();
+                        
+                    if (matchingUmbralItem != null)
+                    {
+                        targetItem = matchingUmbralItem;
+                    }
+                    else
+                    {
+                        targetItem = next.First().Gatherable;
+                    }
+                }
+                else
+                {
+                    targetItem = next.First().Gatherable;
+                }
+                
+                MoveToCloseNode(closestNode, targetItem, config);
+                return;
             }
-
-            var allPositions = next.Location.WorldPositions
-                .Where(n => !VisitedNodes.Contains(n.Key))
-                .SelectMany(w => w.Value.Select(n => (id: w.Key, Position: n)))
-                .Where(v => !IsBlacklisted(v.Position))
+            
+            AutoStatus = "Searching for next Diadem node...";
+            
+            var currentTerritoryId = Svc.ClientState.TerritoryType;
+            if (!Functions.InTheDiadem())
+            {
+                AutoStatus = "Not in Diadem, aborting...";
+                return;
+            }
+            
+            var potentialNodePositions = GatherBuddy.GameData.GatheringNodes.Values
+                .Where(node => node.Territory.Id == currentTerritoryId)
+                .Where(node => node.GatheringType.ToGroup() == currentJob)
+                .SelectMany(node => node.WorldPositions.Values.SelectMany(positions => positions))
+                .Where(pos => !IsBlacklisted(pos))
+                .Where(pos => !_diademVisitedNodes.Any(visited => Vector3.Distance(visited, pos) < DiademNodeProximityThreshold))
+                .Where(pos => !FarNodesSeenSoFar.Contains(pos))
+                .OrderBy(pos => Vector3.Distance(Player.Position, pos))
                 .ToList();
+            
+            if (potentialNodePositions.Any())
+            {
+                var targetPosition = potentialNodePositions.First();
+                var distance = Vector3.Distance(Player.Position, targetPosition);
+                
+                AutoStatus = $"Moving to next Diadem node ({distance:F0}y)...";
+                
+                if (!Dalamud.Conditions[ConditionFlag.Mounted] && distance >= GatherBuddy.Config.AutoGatherConfig.MountUpDistance)
+                {
+                    if (GatherBuddy.Config.AutoGatherConfig.MoveWhileMounting)
+                        Navigate(targetPosition, false);
+                    EnqueueMountUp();
+                }
+                else
+                {
+                    Navigate(targetPosition, ShouldFly(targetPosition));
+                }
+            }
+            else
+            {
+                AutoStatus = "No suitable Diadem nodes found, waiting...";
+            }
+        }
 
-            var visibleNodes = Dalamud.Objects
-                .Where(o => allPositions.Contains((o.BaseId, o.Position)))
+        private void DoNodeMovement(IEnumerable<GatherTarget> next, ConfigPreset config)
+        {
+            if (Functions.InTheDiadem())
+            {
+                DoNodeMovementDiadem(next, config);
+                return;
+            }
+
+            var allPositions = next.Where(n => n.Location.Territory.Id == Player.Territory)
+                .SelectMany(ne => (ne.Node?.WorldPositions ?? ne.FishingSpot?.WorldPositions)
+                        ?.ExceptBy(VisitedNodes, n => n.Key)
+                        .SelectMany(w => w.Value)
+                        .Where(v => !IsBlacklisted(v))
+                 ?? [])
+                .ToHashSet();
+
+            var visibleNodes = Svc.Objects
+                .Where(o => allPositions.Contains(o.Position))
                 .ToList();
 
             var closestTargetableNode = visibleNodes
                 .Where(o => o.IsTargetable)
                 .MinBy(o => Vector3.Distance(Player.Position, o.Position));
 
-            var isSpearfishing = next.Fish?.IsSpearFish == true;
+            var isSpearfishing = next.First().Fish?.IsSpearFish == true;
             if (!isSpearfishing)
             {
-                var isTimedNode = next.Gatherable?.NodeType is NodeType.未知 or NodeType.传说 or NodeType.梦幻;
+                var isTimedNode = next.First().Gatherable?.NodeType is NodeType.Unspoiled or NodeType.Legendary;
                 if (ActivateGatheringBuffs(isTimedNode))
                     return;
             }
 
             if (closestTargetableNode != null)
             {
-                AutoStatus = "正在移动至采集点...";
+                AutoStatus = "Moving to node...";
+                var targetGather = next.First(ti => 
+                    (ti.Node != null && ti.Node.WorldPositions.ContainsKey(closestTargetableNode.DataId)) ||
+                    (ti.FishingSpot != null && ti.FishingSpot.WorldPositions.ContainsKey(closestTargetableNode.DataId)));
                 
-                if (next.Gatherable != null)
+                if (targetGather.Gatherable != null)
                 {
-                    MoveToCloseNode(closestTargetableNode, next.Gatherable, config);
+                    MoveToCloseNode(closestTargetableNode, targetGather.Gatherable, config);
                 }
-                else if (next.Fish != null)
+                else if (targetGather.Fish != null)
                 {
-                    MoveToCloseSpearfishingNode(closestTargetableNode, next.Fish);
+                    MoveToCloseSpearfishingNode(closestTargetableNode, targetGather.Fish);
                 }
                 return;
             }
 
-            AutoStatus = "正在移动至较远采集点...";
+            AutoStatus = "Moving to far node...";
 
-            if (CurrentDestination != default && IsPathing)
+            if (CurrentDestination != default)
             {
                 var currentNode = visibleNodes.FirstOrDefault(o => o.Position == CurrentDestination);
                 if (currentNode != null && !currentNode.IsTargetable)
-                    GatherBuddy.Log.Verbose($"远点不可选中，距离 {currentNode.Position.DistanceToPlayer()}");
+                    GatherBuddy.Log.Verbose($"Far node is not targetable, distance {currentNode.Position.DistanceToPlayer()}.");
 
                 //It takes some time (roundtrip to the server) before a node becomes targetable after it becomes visible,
                 //so we need to delay excluding it. But instead of measuring time, we use distance, since character is traveling at a constant speed.
                 //Value 50 was determined empirically.
-                foreach (var node in allPositions.Where(o => o.Position.DistanceToPlayer() < NodeVisibilityDistance))
-                    FarNodesSeenSoFar.Add(node.Position);
+                foreach (var node in allPositions.Where(o => o.DistanceToPlayer() < 50))
+                    FarNodesSeenSoFar.Add(node);
 
-                if (CurrentDestination.DistanceToPlayer() < NodeVisibilityDistance)
+                if (CurrentDestination.DistanceToPlayer() < 50)
                 {
-                    GatherBuddy.Log.Verbose("远点不可选中, 正在选择其他");
+                    GatherBuddy.Log.Verbose("Far node is not targetable, choosing another");
                 }
                 else
                 {
@@ -1948,138 +1944,66 @@ namespace GatherBuddy.AutoGather
                 }
             }
 
-            (uint? Id, Vector3 Position) selectedFarNode;
+            Vector3 selectedFarNode;
 
-            // Only Legendary, Unspoiled, and Clouded nodes show a map marker.
-            var mapMarkerAvailable = next.Node?.NodeType is NodeType.传说 or NodeType.未知 or NodeType.梦幻;
-            // Wait an additional 8 seconds because it takes a few seconds for the previous flag to disappear.
-            var gracePeriod = next.Time == TimeInterval.Always ? 0 : next.Time.Start - GatherBuddy.Time.ServerTime.AddSeconds(-8);
-            var mapMarker = mapMarkerAvailable && gracePeriod <= 0 ? TimedNodePosition : null;
-
-            if (mapMarkerAvailable && ShouldUseFlag)
+            // only Legendary and Unspoiled show marker
+            var timedNode = next.FirstOrDefault(n => n.Time.Start > GatherBuddy.Time.ServerTime.AddSeconds(-8));
+            if (ShouldUseFlag && timedNode != default)
             {
-                if (mapMarker == null)
+                var pos = TimedNodePosition;
+                // marker not yet loaded on game
+                if (pos == null || timedNode.Time.Start > GatherBuddy.Time.ServerTime.AddSeconds(-8))
                 {
-                    AutoStatus = "等待地图标记出现" + (gracePeriod > 0 ? $" (缓冲时间: {gracePeriod / RealTime.MillisecondsPerSecond} 秒)" : "");
+                    AutoStatus = "Waiting on flag show up";
                     return;
                 }
 
                 selectedFarNode = allPositions
-                    .DefaultIfEmpty()
-                    .MinBy(o => Vector2.DistanceSquared(mapMarker.Value, o.Position.ToVector2()));
-
-                if (selectedFarNode.Position == default || Vector2.DistanceSquared(mapMarker.Value, selectedFarNode.Position.ToVector2()) > 10 * 10)
-                {
-                    var point = new Vector3(mapMarker.Value.X, 0, mapMarker.Value.Y);
-                    selectedFarNode = (null, VNavmesh.Query.Mesh.NearestPoint(point, 10, 10000).GetValueOrDefault(point));
-                }
+                    .Where(o => Vector2.Distance(pos.Value, new Vector2(o.X, o.Z)) < 10)
+                    .OrderBy(o => Vector2.Distance(pos.Value, new Vector2(o.X, o.Z)))
+                    .FirstOrDefault();
+                if (selectedFarNode == default)
+                    selectedFarNode = VNavmesh.Query.Mesh.NearestPoint(new Vector3(pos.Value.X, 0, pos.Value.Y), 10, 10000);
             }
             else
             {
                 //Select the closest node
                 selectedFarNode = allPositions
-                    .Where(n => !FarNodesSeenSoFar.Contains(n.Position))
-                    .DefaultIfEmpty()
-                    .MinBy(v => Vector2.DistanceSquared(mapMarker ?? Player.Position.ToVector2(), v.Position.ToVector2()));
+                    .Where(fn => !visibleNodes.Select(vn => vn.Position).Contains(fn))
+                    .OrderBy(v => Vector3.Distance(Player.Position, v))
+                    .FirstOrDefault(n => !FarNodesSeenSoFar.Contains(n));
 
-                if (selectedFarNode.Position == default)
+                if (selectedFarNode == default)
                 {
                     FarNodesSeenSoFar.Clear();
-                    GatherBuddy.Log.Verbose($"选定采集点为空, 远距离采集点过滤已清除");
+                    GatherBuddy.Log.Verbose($"Selected node was null and far node filters have been cleared");
                     return;
                 }
             }
 
-            var jump = Diadem.IsInside && TryWindmireJump(ref selectedFarNode.Position);
-
-            Navigate(selectedFarNode.Position, ShouldFly(selectedFarNode.Position), direct: jump, nodeId: jump ? null : selectedFarNode.Id);
+            MoveToFarNode(selectedFarNode);
         }
 
         private unsafe void LeaveTheDiadem()
         {
-            TaskManager.Enqueue(() =>
+            AgentModule.Instance()->GetAgentByInternalId(AgentId.ContentsFinderMenu)->Show();
+            if (GenericHelpers.TryGetAddonByName("ContentsFinderMenu", out AtkUnitBase* addon))
             {
-                AgentModule.Instance()->GetAgentByInternalId(AgentId.ContentsFinderMenu)->Show();
-            });
-            
-            TaskManager.Enqueue(() =>
-            {
-                if (GenericHelpers.TryGetAddonByName("ContentsFinderMenu", out AtkUnitBase* addon) && addon->IsReady)
-                {
-                    var leaveCallback = stackalloc FFXIVClientStructs.FFXIV.Component.GUI.AtkValue[1];
-                    addon->FireCallback(1, leaveCallback);
-                    return true;
-                }
-                return false;
-            }, "等待任务搜索器界面");
-            
-            TaskManager.DelayNext(500);
-            
-            TaskManager.Enqueue(() =>
-            {
-                if (GenericHelpers.TryGetAddonByName("SelectYesno", out AtkUnitBase* yesnoAddon) && yesnoAddon->IsReady)
-                {
-                    var yesNo = new AddonMaster.SelectYesno((nint)yesnoAddon);
-                    yesNo.Yes();
-                    return;
-                }
-            });
-            
-            TaskManager.DelayNext(500);
-            TaskManager.Enqueue(() => !GenericHelpers.TryGetAddonByName("SelectYesno", out _), "等待确认对话框关闭");
-            TaskManager.Enqueue(() => GenericHelpers.IsScreenReady());
+                TaskManager.Enqueue(() => Callback.Fire(addon, true,  0));
+                TaskManager.Enqueue(() => Callback.Fire(addon, false, -2));
+                TaskManager.DelayNext(1000);
+                TaskManager.Enqueue(() => Callback.Fire((AtkUnitBase*)(nint)Dalamud.GameGui.GetAddonByName("SelectYesno"), true, 0));
+                TaskManager.Enqueue(() => GenericHelpers.IsScreenReady());
+                return;
+            }
         }
 
         private void AbortAutoGather(string? status = null)
         {
-            if (Diadem.IsInside)
+            if (Functions.InTheDiadem())
             {
                 LeaveTheDiadem();
                 return;
-            }
-
-            if (HasReducibleItems())
-            {
-                if (Player.Job == 18 && GatherBuddy.Config.AutoGatherConfig.DeferReductionDuringFishingBuffs && (IsFishing || HasActiveFishingBuff()))
-                {
-                    GatherBuddy.Log.Debug("[AutoGather] 因正在钓鱼或有增益效果, 中止时跳过精选");
-                }
-                else
-                {
-                    GatherBuddy.Log.Debug("[AutoGather] 在中止时发现可精选物品, 关闭前进行精选");
-                    
-                    if (Player.Job == 18)
-                    {
-                        if (IsGathering)
-                        {
-                            QueueQuitFishingTasks();
-                            return;
-                        }
-
-                        if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
-                        {
-                            TaskManager.Enqueue(() =>
-                            {
-                                AutoHook.SetPluginState?.Invoke(false);
-                                AutoHook.SetAutoStartFishing?.Invoke(false);
-                            });
-                        }
-                        
-                        ReduceItems(true, () =>
-                        {
-                            AbortAutoGather(status);
-                        });
-                    }
-                    else
-                    {
-                        ReduceItems(true, () =>
-                        {
-                            AbortAutoGather(status);
-                        });
-                    }
-                    
-                    return;
-                }
             }
 
             if (!string.IsNullOrEmpty(status))
@@ -2089,6 +2013,7 @@ namespace GatherBuddy.AutoGather
             CloseGatheringAddons();
             if (GatherBuddy.Config.AutoGatherConfig.GoHomeWhenDone)
                 EnqueueActionWithDelay(() => { GoHome(); });
+            _disabledBySystem = true;
             TaskManager.Enqueue(() =>
             {
                 Enabled    = false;
@@ -2109,8 +2034,8 @@ namespace GatherBuddy.AutoGather
                         Callback.Fire(&addon->AtkUnitBase, true, -1);
                     }
                 });
-                TaskManager.Enqueue(() => MasterpieceAddon == null,                 "等待收藏品采集界面关闭");
-                TaskManager.Enqueue(() => GatheringAddon is var addon and not null, "等待采集界面弹出");
+                TaskManager.Enqueue(() => MasterpieceAddon == null,                 "Wait until GatheringMasterpiece addon is closed");
+                TaskManager.Enqueue(() => GatheringAddon is var addon and not null, "Wait until Gathering addon pops up");
                 TaskManager.DelayNext(
                     300); //There is some delay after the moment the addon pops up (and is ready) before the callback can be used to close it. We wait some time and retry the callback.
             }
@@ -2137,12 +2062,12 @@ namespace GatherBuddy.AutoGather
                                 master.Yes();
                             }
                         }, true);
-                        TaskManager.EnqueueImmediate(() => !IsGathering, "等待采集界面关闭");
+                        TaskManager.EnqueueImmediate(() => !IsGathering, "Wait until Gathering addon is closed");
                         return true;
                     }
 
                     return !IsGathering;
-                }, "等待采集界面关闭或确认对话框弹出");
+                }, "Wait until Gathering addon is closed or SelectYesno addon pops up");
             }
         }
 
@@ -2150,28 +2075,28 @@ namespace GatherBuddy.AutoGather
         {
             var level = gatheringType switch
             {
-                GatheringType.采矿工    => DiscipleOfLand.MinerLevel,
-                GatheringType.园艺工 => DiscipleOfLand.BotanistLevel,
-                GatheringType.捕鱼人   => DiscipleOfLand.FisherLevel,
-                GatheringType.多职业 => Math.Max(DiscipleOfLand.MinerLevel, DiscipleOfLand.BotanistLevel),
+                GatheringType.Miner    => DiscipleOfLand.MinerLevel,
+                GatheringType.Botanist => DiscipleOfLand.BotanistLevel,
+                GatheringType.Fisher   => DiscipleOfLand.FisherLevel,
+                GatheringType.Multiple => Math.Max(DiscipleOfLand.MinerLevel, DiscipleOfLand.BotanistLevel),
                 _                      => 0
             };
             if (level < Actions.Collect.MinLevel)
             {
-                Communicator.PrintError("已将收藏品加入采集列表, 但等级不足以采集");
+                Communicator.PrintError("You've put a collectable on the gathering list, but your level is not high enough to gather it.");
                 return false;
             }
 
             var questId = gatheringType switch
             {
-                GatheringType.采矿工    => Actions.Collect.QuestIds.Miner,
-                GatheringType.园艺工 => Actions.Collect.QuestIds.Botanist,
+                GatheringType.Miner    => Actions.Collect.QuestIds.Miner,
+                GatheringType.Botanist => Actions.Collect.QuestIds.Botanist,
                 _                      => 0u
             };
 
             if (questId != 0 && !QuestManager.IsQuestComplete(questId))
             {
-                Communicator.PrintError("已将收藏品加入采集列表, 但尚未解锁收藏品功能");
+                Communicator.PrintError("You've put a collectable on the gathering list, but you haven't unlocked the collectables.");
                 var sheet      = Dalamud.GameData.GetExcelSheet<Lumina.Excel.Sheets.Quest>()!;
                 var row        = sheet.GetRow(questId)!;
                 var loc        = row.IssuerLocation.Value!;
@@ -2179,7 +2104,7 @@ namespace GatherBuddy.AutoGather
                 var pos        = MapUtil.WorldToMap(new Vector2(loc.X, loc.Z), map);
                 var mapPayload = new MapLinkPayload(loc.Territory.RowId, loc.Map.RowId, pos.X, pos.Y);
                 var text       = new SeStringBuilder();
-                text.AddText("收藏品功能可通过任务 ")
+                text.AddText("Collectables are unlocked by ")
                     .AddUiForeground(0x0225)
                     .AddUiGlow(0x0226)
                     .AddQuestLink(questId)
@@ -2192,7 +2117,7 @@ namespace GatherBuddy.AutoGather
                     .Add(RawPayload.LinkTerminator)
                     .AddUiGlowOff()
                     .AddUiForegroundOff()
-                    .AddText(" 解锁, 该任务可在 ")
+                    .AddText(" quest, which can be started in ")
                     .AddUiForeground(0x0225)
                     .AddUiGlow(0x0226)
                     .Add(mapPayload)
@@ -2205,7 +2130,7 @@ namespace GatherBuddy.AutoGather
                     .Add(RawPayload.LinkTerminator)
                     .AddUiGlowOff()
                     .AddUiForegroundOff()
-                    .AddText(" 开始");
+                    .AddText(".");
                 Communicator.Print(text.BuiltString);
                 return false;
             }
@@ -2217,23 +2142,23 @@ namespace GatherBuddy.AutoGather
         {
             var set = job switch
             {
-                GatheringType.采矿工 => GatherBuddy.Config.MinerSetName,
-                GatheringType.园艺工 => GatherBuddy.Config.BotanistSetName,
-                GatheringType.捕鱼人 => GatherBuddy.Config.FisherSetName,
+                GatheringType.Miner => GatherBuddy.Config.MinerSetName,
+                GatheringType.Botanist => GatherBuddy.Config.BotanistSetName,
+                GatheringType.Fisher => GatherBuddy.Config.FisherSetName,
                 _ => null,
             };
             if (string.IsNullOrEmpty(set))
             {
-                Communicator.PrintError($"未设置 {job} 职业的套装");
+                Communicator.PrintError($"No gear set for {job} configured.");
                 return false;
             }
 
-            if (job is GatheringType.采矿工 or GatheringType.园艺工
-                && Player.Job == 18 /* FSH */
+            if (job is GatheringType.Miner or GatheringType.Botanist
+                && Player.Job == Job.FSH
                 && GatherBuddy.Config.AutoGatherConfig.UseAutoHook
                 && AutoHook.Enabled)
             {
-                GatherBuddy.Log.Debug($"[AutoGather] 从捕鱼人切换到 {job}, 正在禁用 AutoHook");
+                Svc.Log.Debug($"[AutoGather] Swapping from FSH to {job}, disabling AutoHook.");
                 try
                 {
                     AutoHook.SetPluginState(false);
@@ -2241,13 +2166,12 @@ namespace GatherBuddy.AutoGather
                 }
                 catch (Exception e)
                 {
-                    GatherBuddy.Log.Error($"[AutoGather] 切换装备时禁用 AutoHook 失败: {e}");
+                    GatherBuddy.Log.Error($"[AutoGather] Failed to disable AutoHook on gear change: {e}");
                 }
 
                 CleanupAutoHook();
             }
 
-            _diademPathIndex = -1; // Reset The Diadem path after changing job
             Chat.ExecuteCommand($"/gearset change \"{set}\"");
             TaskManager.DelayNext(Random.Shared.Next(delay, delay + 500)); // Add a random delay to be less suspicious
             return true;
@@ -2271,26 +2195,26 @@ namespace GatherBuddy.AutoGather
 
                 if (!stillEnabled)
                 {
-                    GatherBuddy.Log.Debug($"[AutoGather] 经过 {attempt} 次尝试后 AutoHook 已完全禁用");
+                    Svc.Log.Debug($"[AutoGather] AutoHook fully disabled after {attempt} attempt(s).");
                     return;
                 }
 
-                GatherBuddy.Log.Debug($"[AutoGather] AutoHook 仍处于启用状态 (插件={pluginOn}, 自动启动={autoStartOn})," +
-                              $"第 {attempt}/{maxAttempts} 次尝试 - 发送 IPC 禁用");
+                Svc.Log.Debug($"[AutoGather] AutoHook still enabled (plugin={pluginOn}, autoStart={autoStartOn}), " +
+                              $"attempt {attempt}/{maxAttempts} – sending IPC disable.");
 
                 AutoHook.SetAutoStartFishing?.Invoke(false);
                 AutoHook.SetPluginState?.Invoke(false);
 
                 if (attempt >= maxAttempts)
                 {
-                    GatherBuddy.Log.Warning("[AutoGather] 超过最大尝试次数后未能完全禁用 AutoHook");
+                    Svc.Log.Warning("[AutoGather] Failed to fully disable AutoHook after max attempts.");
                     return;
                 }
 
-                TaskManager.Enqueue(TryDisableOnce, "确保 AutoHook 已禁用");
+                TaskManager.Enqueue(TryDisableOnce, "EnsureAutoHookDisabled");
             }
 
-            TaskManager.Enqueue(TryDisableOnce, "确保 AutoHook 已禁用");
+            TaskManager.Enqueue(TryDisableOnce, "EnsureAutoHookDisabled");
         }
 
 
@@ -2304,70 +2228,42 @@ namespace GatherBuddy.AutoGather
             _activeItemList.DebugMarkVisited(target);
         }
         
-        private bool ValidateActiveItemsPerception()
+        private bool HasUmbralItemsInActiveList()
         {
-            try
-            {
-                var currentJob = Dalamud.Objects.LocalPlayer?.ClassJob.RowId ?? 0;
-                var isMiner = currentJob == 16;
-                var isBotanist = currentJob == 17;
-                
-                if (!isMiner && !isBotanist)
-                {
-                    GatherBuddy.Log.Debug($"[AutoGather] 启用时跳过鉴别力验证 - 玩家职业非采矿工或园艺工 (当前职业: {currentJob})");
-                    return true;
-                }
-                
-                var playerPerception = DiscipleOfLand.Perception;
-                var insufficientPerception = new List<(string Name, int Required)>();
-                
-                if (_activeItemList.GetType()
-                    .GetField("_listsManager", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
-                    ?.GetValue(_activeItemList) is not AutoGatherListsManager listsManager)
-                {
-                    return true;
-                }
-                
-                foreach (var (item, _) in listsManager.ActiveItems)
-                {
-                    if (item is not Gatherable gatherable)
-                        continue;
-                    
-                    var requiredPerception = (int)gatherable.GatheringData.PerceptionReq;
-                    if (requiredPerception == 0)
-                        continue;
-                    
-                    var gatheringType = gatherable.GatheringType.ToGroup();
-                    if ((isMiner && gatheringType != GatheringType.采矿工) || (isBotanist && gatheringType != GatheringType.园艺工))
-                    {
-                        continue;
-                    }
-                    
-                    GatherBuddy.Log.Debug($"[AutoGather] 验证 {gatherable.Name[GatherBuddy.Language]}: 需要 {requiredPerception} 鉴别力 (当前: {playerPerception})");
-                    
-                    if (playerPerception < requiredPerception)
-                    {
-                        insufficientPerception.Add((gatherable.Name[GatherBuddy.Language], requiredPerception));
-                    }
-                }
-                
-                if (insufficientPerception.Count > 0)
-                {
-                    var itemDetails = string.Join(", ", insufficientPerception.Select(x => $"{x.Name} (需要 {x.Required})"));
-                    Communicator.PrintError($"[AutoGather] 无法启用自动采集: 鉴别力不足 (当前: {playerPerception}): {itemDetails}");
-                    GatherBuddy.Log.Error($"[AutoGather] 自动采集未启用: 鉴别力不足 {playerPerception}");
-                    return false;
-                }
-                
-                return true;
-            }
-            catch (System.Exception ex)
-            {
-                GatherBuddy.Log.Error($"[AutoGather] 验证活跃物品鉴别力时出错: {ex.Message}\n{ex.StackTrace}");
-                return true;
-            }
+            return _activeItemList.GetType()
+                .GetField("_listsManager", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                ?.GetValue(_activeItemList) is AutoGatherListsManager listsManager
+                && listsManager.ActiveItems.Any(item => UmbralNodes.UmbralNodeData.Any(entry => entry.ItemIds.Contains(item.Item.ItemId)));
         }
         
+        private (Gatherable Item, uint Quantity) GetFirstUmbralItemFromActiveList()
+        {
+            if (_activeItemList.GetType()
+                .GetField("_listsManager", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                ?.GetValue(_activeItemList) is not AutoGatherListsManager listsManager)
+                return (null, 0);
+                
+            return listsManager.ActiveItems
+                .Where(item => item.Item.GetInventoryCount() < item.Quantity)
+                .FirstOrDefault(item => UmbralNodes.UmbralNodeData.Any(entry => entry.ItemIds.Contains(item.Item.ItemId)));
+        }
+        
+        private IEnumerable<(Gatherable Item, uint Quantity)> GetActiveItemsNeedingGathering()
+        {
+            if (_activeItemList.GetType()
+                .GetField("_listsManager", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                ?.GetValue(_activeItemList) is not AutoGatherListsManager listsManager)
+                return Enumerable.Empty<(Gatherable, uint)>();
+                
+            return listsManager.ActiveItems
+                .Where(item => item.Item.GetInventoryCount() < item.Quantity); // Only items that need gathering
+        }
+        
+        private bool IsUmbralItem(IGatherable item)
+        {
+            return UmbralNodes.UmbralNodeData.Any(entry => entry.ItemIds.Contains(item.ItemId));
+        }
+
         private bool ShouldWaitForAutoRetainer()
         {
             try
@@ -2377,16 +2273,17 @@ namespace GatherBuddy.AutoGather
                     if (_currentGatherTarget != null)
                     {
                         var target = _currentGatherTarget.Value;
-                        if (target.Node?.NodeType is NodeType.传说 or NodeType.未知)
+                        if (target.Node?.NodeType is NodeType.Legendary or NodeType.Unspoiled)
                         {
                             return false;
                         }
                     }
                     
-                    var nextItem = _activeItemList.GetNextOrDefault();
-                    if (nextItem != default)
+                    var nextItems = _activeItemList.GetNextOrDefault(new List<uint>());
+                    if (nextItems.Any())
                     {
-                        if (nextItem.Node?.NodeType is NodeType.传说 or NodeType.未知)
+                        var nextItem = nextItems.First();
+                        if (nextItem.Node?.NodeType is NodeType.Legendary or NodeType.Unspoiled)
                         {
                             if (nextItem.Time.InRange(AdjustedServerTime) && 
                                 !_activeItemList.DebugVisitedTimedLocations.ContainsKey(nextItem.Node))
@@ -2454,14 +2351,14 @@ namespace GatherBuddy.AutoGather
                 {
                     if (!_autoRetainerMultiModeEnabled)
                     {
-                        var player = Dalamud.Objects.LocalPlayer;
+                        var player = Svc.ClientState.LocalPlayer;
                         if (player != null)
                             _originalCharacterNameWorld = $"{player.Name}@{player.HomeWorld.Value.Name}";
                         
                         AutoRetainer.EnableMultiMode?.Invoke();
                         _autoRetainerMultiModeEnabled = true;
                     }
-                    AutoStatus = $"正在等待处理雇员, 剩余: ({closestTime.Value} 秒)...";
+                    AutoStatus = $"Waiting for retainers ({closestTime.Value}s remaining)...";
                     return true;
                 }
                 else
@@ -2475,7 +2372,7 @@ namespace GatherBuddy.AutoGather
                     
                     if (!string.IsNullOrEmpty(_originalCharacterNameWorld))
                     {
-                        var currentPlayer = Dalamud.Objects.LocalPlayer;
+                        var currentPlayer = Svc.ClientState.LocalPlayer;
                         if (currentPlayer != null)
                         {
                             var currentCharacter = $"{currentPlayer.Name}@{currentPlayer.HomeWorld.Value.Name}";
@@ -2483,7 +2380,7 @@ namespace GatherBuddy.AutoGather
                             {
                                 if (Lifestream.IsBusy != null && Lifestream.IsBusy())
                                 {
-                                    AutoStatus = $"正在等待角色切换完成...";
+                                    AutoStatus = $"Waiting for character change to complete...";
                                     return true;
                                 }
                                 
@@ -2495,7 +2392,7 @@ namespace GatherBuddy.AutoGather
                                         var charName = parts[0];
                                         var worldName = parts[1];
                                         
-                                        AutoStatus = $"重新登录: {charName}@{worldName}...";
+                                        AutoStatus = $"Relogging to {charName}@{worldName}...";
                                         
                                         var errorCode = Lifestream.ChangeCharacter(charName, worldName);
                                         if (errorCode == 0)
@@ -2504,19 +2401,19 @@ namespace GatherBuddy.AutoGather
                                         }
                                         else
                                         {
-                                            GatherBuddy.Log.Warning($"无法重新登录到 {_originalCharacterNameWorld}。错误代码: {errorCode}");
+                                            GatherBuddy.Log.Warning($"Failed to relog to {_originalCharacterNameWorld}. Error code: {errorCode}");
                                             _originalCharacterNameWorld = null;
                                         }
                                     }
                                     else
                                     {
-                                        GatherBuddy.Log.Warning($"无效的角色名称格式: {_originalCharacterNameWorld}");
+                                        GatherBuddy.Log.Warning($"Invalid character format: {_originalCharacterNameWorld}");
                                         _originalCharacterNameWorld = null;
                                     }
                                 }
                                 else
                                 {
-                                    GatherBuddy.Log.Warning("无法重新登录 - Lifestream 不可用");
+                                    GatherBuddy.Log.Warning("Cannot relog - Lifestream not available");
                                     _originalCharacterNameWorld = null;
                                 }
                             }
@@ -2524,7 +2421,7 @@ namespace GatherBuddy.AutoGather
                             {
                                 if (!Player.Available || !Player.Interactable)
                                 {
-                                    AutoStatus = "等待玩家准备就绪...";
+                                    AutoStatus = "Waiting for player to be ready...";
                                     return true;
                                 }
                                 
@@ -2540,7 +2437,7 @@ namespace GatherBuddy.AutoGather
             }
             catch (Exception e)
             {
-                GatherBuddy.Log.Error($"检查 AutoRetainer 探险计时失败: {e.Message}");
+                GatherBuddy.Log.Error($"Failed to check AutoRetainer venture times: {e.Message}");
                 return false;
             }
         }
@@ -2549,10 +2446,8 @@ namespace GatherBuddy.AutoGather
         {
             _advancedUnstuck.Dispose();
             _activeItemList.Dispose();
-            _diadem?.Dispose();
-            Dalamud.Chat.CheckMessageHandled -= OnMessageHandled;
-            Dalamud.ToastGui.QuestToast -= OnQuestToast;
-            //Dalamud.AddonLifecycle.UnregisterListener(AddonEvent.PreFinalize, "Gathering", OnGatheringFinalize);
+            Svc.Chat.CheckMessageHandled -= OnMessageHandled;
+            //Svc.AddonLifecycle.UnregisterListener(AddonEvent.PreFinalize, "Gathering", OnGatheringFinalize);
         }
     }
 }

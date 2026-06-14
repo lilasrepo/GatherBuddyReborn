@@ -1,4 +1,7 @@
+using System;
 using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
 using GatherBuddy.Utility;
 using Lumina.Excel.Sheets;
 
@@ -155,8 +158,8 @@ public readonly struct BitfieldUptime : IEquatable<BitfieldUptime>
                 }
                 else
                 {
-                    ret =  ret.Replace(" 与 ", ", ");
-                    ret += " 与 ";
+                    ret =  ret.Replace(" and ", ", ");
+                    ret += " and ";
                 }
             }
 

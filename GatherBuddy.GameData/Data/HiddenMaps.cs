@@ -32,7 +32,8 @@ public static class HiddenMaps
         {
             if (!data.Gatherables.TryGetValue(map, out var mapItem))
             {
-                data.Log.Error($"找不到地图物品 {map}.");
+                // C-fix: 7.2+ era hidden map items not in TC 7.1 Lumina — Verbose, not Error
+                data.Log.Verbose($"Could not find map item {map}.");
                 continue;
             }
 
@@ -40,7 +41,7 @@ public static class HiddenMaps
             {
                 if (!data.GatheringNodes.TryGetValue(node, out var nodeData))
                 {
-                    data.Log.Error($"找不到采集点 {node}.");
+                    data.Log.Verbose($"Could not find gathering node {node}.");
                     continue;
                 }
 

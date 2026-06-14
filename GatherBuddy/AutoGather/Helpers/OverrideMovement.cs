@@ -1,4 +1,4 @@
-using Dalamud.Game.Config;
+﻿using Dalamud.Game.Config;
 using Dalamud.Hooking;
 using Dalamud.Utility.Signatures;
 using FFXIVClientStructs.FFXIV.Client.Game.Control;
@@ -6,8 +6,9 @@ using System;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Dalamud.Game.ClientState.Conditions;
-using GatherBuddy.Utilities;
-using GatherBuddy.Plugin;
+using ECommons.DalamudServices;
+using ECommons.Logging;
+using ECommons.MathHelpers;
 
 //Credit: https://github.com/NightmareXIV/Lifestream/blob/main/Lifestream/Movement/OverrideMovement.cs#7ad417a
 namespace GatherBuddy.AutoGather.Movement;
@@ -73,16 +74,16 @@ public unsafe class OverrideMovement : IDisposable
 
     public OverrideMovement()
     {
-        Dalamud.Hooking.InitializeFromAttributes(this);
+        Svc.Hook.InitializeFromAttributes(this);
         GatherBuddy.Log.Information($"RMIWalk address: 0x{_rmiWalkHook.Address:X}");
         GatherBuddy.Log.Information($"RMIFly address: 0x{_rmiFlyHook.Address:X}");
-        Dalamud.GameConfig.UiControlChanged += OnConfigChanged;
+        Svc.GameConfig.UiControlChanged += OnConfigChanged;
         UpdateLegacyMode();
     }
 
     public void Dispose()
     {
-        Dalamud.GameConfig.UiControlChanged -= OnConfigChanged;
+        Svc.GameConfig.UiControlChanged -= OnConfigChanged;
         _rmiWalkHook.Dispose();
         _rmiFlyHook.Dispose();
     }
@@ -91,7 +92,7 @@ public unsafe class OverrideMovement : IDisposable
     {
         _rmiWalkHook.Original(self, sumLeft, sumForward, sumTurnLeft, haveBackwardOrStrafe, a6, bAdditiveUnk);
         // TODO: we really need to introduce some extra checks that PlayerMoveController::readInput does - sometimes it skips reading input, and returning something non-zero breaks stuff...
-        bool movementAllowed = bAdditiveUnk == 0 && !Dalamud.Conditions[ConditionFlag.BeingMoved];
+        bool movementAllowed = bAdditiveUnk == 0 && !Svc.Condition[ConditionFlag.BeingMoved];
         if (movementAllowed && (IgnoreUserInput || *sumLeft == 0 && *sumForward == 0) && DirectionToDestination(false) is var relDir && relDir != null)
         {
             var dir = relDir.Value.h.ToDirection();
@@ -115,7 +116,7 @@ public unsafe class OverrideMovement : IDisposable
 
     private (Angle h, Angle v)? DirectionToDestination(bool allowVertical)
     {
-        var player = Dalamud.Objects.LocalPlayer;
+        var player = Svc.ClientState.LocalPlayer;
         if (player == null)
             return null;
 
@@ -135,7 +136,7 @@ public unsafe class OverrideMovement : IDisposable
     private void OnConfigChanged(object? sender, ConfigChangeEvent evt) => UpdateLegacyMode();
     private void UpdateLegacyMode()
     {
-        _legacyMode = Dalamud.GameConfig.UiControl.TryGetUInt("MoveMode", out var mode) && mode == 1;
-        GatherBuddy.Log.Information($"旧版模式现已{(_legacyMode ? "启用" : "禁用")}");
+        _legacyMode = Svc.GameConfig.UiControl.TryGetUInt("MoveMode", out var mode) && mode == 1;
+        GatherBuddy.Log.Information($"Legacy mode is now {(_legacyMode ? "enabled" : "disabled")}");
     }
 }

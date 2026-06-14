@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using Dalamud.Plugin.Services;
 using GatherBuddy.Enums;
 using GatherBuddy.Interfaces;
@@ -8,7 +10,6 @@ using ItemRow = Lumina.Excel.Sheets.Item;
 using FishRow = Lumina.Excel.Sheets.FishParameter;
 using SpearFishRow = Lumina.Excel.Sheets.SpearfishingItem;
 using FFXIVClientStructs.FFXIV.Client.Game;
-using Weather = GatherBuddy.Structs.Weather;
 
 namespace GatherBuddy.Classes;
 
@@ -24,10 +25,10 @@ public partial class Fish : IComparable<Fish>, IGatherable
     public SpearFishRow? SpearfishData
         => _fishData is SpearFishRow s ? s : null;
 
-    public List<FishingSpot> FishingSpots { get; init; } = new List<FishingSpot>();
+    public IList<FishingSpot> FishingSpots { get; init; } = new List<FishingSpot>();
     public MultiString        Name         { get; init; }
 
-    public IReadOnlyList<ILocation> Locations
+    public IEnumerable<ILocation> Locations
         => FishingSpots;
 
     public int InternalLocationId { get; internal set; }
@@ -72,8 +73,6 @@ public partial class Fish : IComparable<Fish>, IGatherable
 
     public string Folklore { get; init; }
 
-    public Weather UmbralWeather => CurrentWeather.Length > 0 && CurrentWeather[0].IsUmbral ? CurrentWeather[0] : Weather.Invalid;
-
     public Fish(IDataManager gameData, SpearFishRow fishRow, ExcelSheet<FishingNoteInfo> catchData)
     {
         ItemData  = fishRow.Item.Value;
@@ -84,7 +83,7 @@ public partial class Fish : IComparable<Fish>, IGatherable
         Folklore         = string.Empty;
         Size             = SpearfishSize.Unknown;
         Speed            = SpearfishSpeed.Unknown;
-        BiteType         = BiteType.无;
+        BiteType         = BiteType.None;
         Snagging         = Snagging.None;
         HookSet          = HookSet.None;
         FishType         = ItemData.Rarity > 1 ? FishType.Big : FishType.Normal;
@@ -101,7 +100,7 @@ public partial class Fish : IComparable<Fish>, IGatherable
         Folklore = MultiString.ParseSeStringLumina(fishRow.GatheringSubCategory.ValueNullable?.FolkloreBook);
         Size     = SpearfishSize.None;
         Speed    = SpearfishSpeed.None;
-        BiteType = BiteType.未知;
+        BiteType = BiteType.Unknown;
         Snagging = Snagging.Unknown;
         HookSet  = HookSet.Unknown;
         FishType = ItemData.Rarity > 1 ? FishType.Big : FishType.Normal;

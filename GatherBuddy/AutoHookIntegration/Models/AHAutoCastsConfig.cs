@@ -31,9 +31,6 @@ public class AHAutoCastsConfig
     [JsonProperty("CastPrizeCatch")]
     public AHAutoPrizeCatch? CastPrizeCatch { get; set; }
 
-    [JsonProperty("CastChum")]
-    public AHAutoChum? CastChum { get; set; }
-
     [JsonProperty("CastThaliaksFavor")]
     public AHAutoThaliaksFavor? CastThaliaksFavor { get; set; }
 }
@@ -63,12 +60,6 @@ public class AHAutoCordial
 {
     [JsonProperty("Enabled")]
     public bool Enabled { get; set; }
-    
-    [JsonProperty("GpThreshold")]
-    public int? GpThreshold { get; set; }
-    
-    [JsonProperty("GpThresholdAbove")]
-    public bool? GpThresholdAbove { get; set; }
 }
 
 public class AHAutoPrizeCatch
@@ -84,24 +75,6 @@ public class AHAutoPrizeCatch
 
     [JsonProperty("UseOnlyWithActiveSlap")]
     public bool UseOnlyWithActiveSlap { get; set; }
-    
-    [JsonProperty("GpThreshold")]
-    public int GpThreshold { get; set; }
-    
-    [JsonProperty("GpThresholdAbove")]
-    public bool GpThresholdAbove { get; set; } = true;
-}
-
-public class AHAutoChum
-{
-    [JsonProperty("Enabled")]
-    public bool Enabled { get; set; }
-    
-    [JsonProperty("GpThreshold")]
-    public int GpThreshold { get; set; }
-    
-    [JsonProperty("GpThresholdAbove")]
-    public bool GpThresholdAbove { get; set; } = true;
 }
 
 public class AHAutoThaliaksFavor

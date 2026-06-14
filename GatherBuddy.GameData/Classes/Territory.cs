@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using GatherBuddy.Structs;
 using GatherBuddy.Utility;
 using Lumina.Excel.Sheets;

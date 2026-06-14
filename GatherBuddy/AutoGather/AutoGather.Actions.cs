@@ -1,4 +1,4 @@
-using GatherBuddy.Helpers;
+﻿using ECommons.GameHelpers;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using GatherBuddy.Classes;
 using System;
@@ -6,8 +6,10 @@ using System.Linq;
 using GatherBuddy.CustomInfo;
 using System.Collections.Generic;
 using Dalamud.Game.ClientState.Objects.Enums;
-using GatherBuddy.Automation;
-using GatherBuddy.Utilities;
+using ECommons;
+using ECommons.DalamudServices;
+using ECommons.Throttlers;
+using ECommons.UIHelpers.AddonMasterImplementations;
 using GatherBuddy.AutoGather.AtkReaders;
 using GatherBuddy.AutoGather.Helpers;
 using GatherBuddy.AutoGather.Extensions;
@@ -26,23 +28,9 @@ namespace GatherBuddy.AutoGather
         {
             if (gatherable == null)
                 return false;
-            if (LuckUsed || GatheringWindowReader!.HasUnhidden)
+            if (LuckUsed || GatheringWindowReader!.HiddenRevealed)
                 return false;
             if (!gatherable.GatheringData.IsHidden && !gatherable.IsTreasureMap)
-                return false;
-
-            var config = MatchConfigPreset(gatherable).GatherableActions.Luck;
-            if (!config.Enabled)
-                return false;
-            if (Player.Level < Actions.Luck.MinLevel)
-                return false;
-            if (Player.Object == null)
-                return false;
-            if (Player.Object.CurrentGp < Actions.Luck.GpCost)
-                return false;
-            if (Player.Object.CurrentGp < config.MinGP)
-                return false;
-            if (Player.Object.CurrentGp > config.MaxGP)
                 return false;
 
             return true;
@@ -83,8 +71,7 @@ namespace GatherBuddy.AutoGather
                 return false;
             if (!IsGivingLandOffCooldown)
                 return false;
-            // TGL's provided bonus no longer overcaps in Dawntrail, but keep it at least 5 to avoid wasting GP.
-            if (slot.Item.GetInventoryCount() > 9999 - 5 - slot.Yield)
+            if (slot.Item.GetInventoryCount() > 9999 - GivingLandYield - slot.Yield)
                 return false;
 
             return true;
@@ -94,7 +81,7 @@ namespace GatherBuddy.AutoGather
         {
             if (!CheckConditions(Actions.TwelvesBounty, config.TwelvesBounty, slot.Item, slot))
                 return false;
-            if (slot.Item.GetInventoryCount() > 9999 - 3 - slot.Yield)
+            if (slot.Item.GetInventoryCount() > 9999 - 3)
                 return false;
 
             return true;
@@ -125,7 +112,7 @@ namespace GatherBuddy.AutoGather
         }
 
 
-        private unsafe void DoActionTasks(GatherTarget target)
+        private unsafe void DoActionTasks(IEnumerable<GatherTarget> target)
         {
             if (MasterpieceReader?.IsValid == true)
             {
@@ -151,52 +138,42 @@ namespace GatherBuddy.AutoGather
 
         public FishingState LastState = FishingState.None;
 
-        private unsafe void DoFishingTasks(GatherTarget target)
+        private unsafe void DoFishingTasks(IEnumerable<GatherTarget> targets)
         {
-            var config = MatchConfigPreset(target.Fish!);
-            if (TryUseFishingConsumables(config))
-                return;
-        
-            if (SpiritbondMax > 0)
+        if (SpiritbondMax > 0)
+        {
+            if (IsGathering || IsFishing)
             {
-                if (GatherBuddy.Config.AutoGatherConfig.DeferMateriaExtractionDuringFishingBuffs && (IsFishing || HasActiveFishingBuff()))
-                    return;
-                
-                if (IsGathering || IsFishing)
-                {
-                    if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
-                    {
-                        AutoHook.SetPluginState?.Invoke(false);
-                        AutoHook.SetAutoStartFishing?.Invoke(false);
-                    }
-                    QueueQuitFishingTasks();
-                    return;
-                }
-
                 if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
                 {
                     AutoHook.SetPluginState?.Invoke(false);
                     AutoHook.SetAutoStartFishing?.Invoke(false);
                 }
+                QueueQuitFishingTasks();
+                return;
+            }
 
-                DoMateriaExtraction();
-                TaskManager.Enqueue(() =>
+            if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
+            {
+                AutoHook.SetPluginState?.Invoke(false);
+                AutoHook.SetAutoStartFishing?.Invoke(false);
+            }
+
+            DoMateriaExtraction();
+            TaskManager.Enqueue(() =>
+            {
+                if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
                 {
-                    if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
-                    {
-                        AutoHook.SetPluginState?.Invoke(true);
-                        AutoHook.SetAutoStartFishing?.Invoke(true);
-                    }
-                });
+                    AutoHook.SetPluginState?.Invoke(true);
+                    AutoHook.SetAutoStartFishing?.Invoke(true);
+                }
+            });
                 return;
             }
 
             if (FreeInventorySlots < 20 && HasReducibleItems())
             {
-                if (GatherBuddy.Config.AutoGatherConfig.DeferReductionDuringFishingBuffs && (IsFishing || HasActiveFishingBuff()))
-                    return;
-                
-                if (IsFishing || IsGathering)
+                if (IsFishing)
                 {
                     QueueQuitFishingTasks();
                     return;
@@ -211,7 +188,7 @@ namespace GatherBuddy.AutoGather
                 });
             }
 
-            ReduceItems(true, () =>
+            ReduceItems(false, () =>
             {
                 if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
                 {
@@ -226,6 +203,7 @@ namespace GatherBuddy.AutoGather
                 return;
 
             var state  = GatherBuddy.EventFramework.FishingState;
+            var config = MatchConfigPreset(targets.First(t => t.Fish != null).Fish!);
             
             if (!GatherBuddy.Config.AutoGatherConfig.UseAutoHook || !AutoHook.Enabled)
             {
@@ -236,13 +214,13 @@ namespace GatherBuddy.AutoGather
                 }
             }
 
-            if (Throttler.Throttle("GBR Fishing", 500))
+            if (EzThrottler.Throttle("GBR Fishing", 500))
             {
                 switch (state)
                 {
                     case FishingState.None:
                     case FishingState.PoleReady:
-                        HandleReady(target, config);
+                        HandleReady(targets.First(t => t.Fish != null), config);
                         break;
                 }
             }
@@ -254,6 +232,40 @@ namespace GatherBuddy.AutoGather
 
             SetupAutoHookForFishing(target);
 
+            var bait = GetCorrectBaitId(target);
+            if (bait == 0)
+            {
+                Communicator.Print($"No bait found in inventory. Auto-fishing cannot continue.");
+                AbortAutoGather();
+            }
+
+            if (bait != GatherBuddy.CurrentBait.Current)
+            {
+                var switchResult = GatherBuddy.CurrentBait.ChangeBait(bait);
+                switch (switchResult)
+                {
+                    case CurrentBait.ChangeBaitReturn.InvalidBait:
+                        Svc.Log.Error("Invalid bait selected: " + bait);
+                        AbortAutoGather();
+                        break;
+                    case CurrentBait.ChangeBaitReturn.NotInInventory:
+                        Communicator.Print(
+                            $"Bait '{target.Fish!.InitialBait.Name}' for fish '{target.Fish!.Name[GatherBuddy.Language]}' not in inventory. Auto-fishing cannot continue.");
+                        AbortAutoGather();
+                        break;
+                    case CurrentBait.ChangeBaitReturn.Success:
+                    case CurrentBait.ChangeBaitReturn.AlreadyEquipped:
+                        break;
+                    case CurrentBait.ChangeBaitReturn.UnknownError:
+                        Svc.Log.Error("Unknown error when switching bait. Auto-gather cannot continue.");
+                        AbortAutoGather();
+                        break;
+                }
+
+                TaskManager.DelayNext(1000);
+                return;
+            }
+
             if (GatherBuddy.Config.AutoGatherConfig.UseAutoHook && AutoHook.Enabled)
             {
                 var hasSnagStatus = Player.Status.Any(s => s.StatusId == 761);
@@ -261,13 +273,13 @@ namespace GatherBuddy.AutoGather
                 
                 if (needsSnagging && !hasSnagStatus)
                 {
-                    GatherBuddy.Log.Debug($"[AutoGather] 为 {target.Fish!.Name[GatherBuddy.Language]} 启用钓组");
+                    GatherBuddy.Log.Debug($"[AutoGather] Enabling Snagging for {target.Fish!.Name[GatherBuddy.Language]}");
                     EnqueueActionWithDelay(() => UseAction(Actions.Snagging));
                     return;
                 }
                 else if (!needsSnagging && hasSnagStatus)
                 {
-                    GatherBuddy.Log.Debug($"[AutoGather] 为 {target.Fish!.Name[GatherBuddy.Language]} 禁用钓组");
+                    GatherBuddy.Log.Debug($"[AutoGather] Disabling Snagging for {target.Fish!.Name[GatherBuddy.Language]}");
                     EnqueueActionWithDelay(() => UseAction(Actions.Snagging));
                     return;
                 }
@@ -321,6 +333,22 @@ namespace GatherBuddy.AutoGather
             return false;
         }
 
+        private uint GetCorrectBaitId(GatherTarget target)
+        {
+            var bait = target.Fish!.InitialBait;
+            if (GetInventoryItemCount(bait.Id) > 0)
+                return bait.Id;
+
+            var versatileLure = GatherBuddy.GameData.Bait[29717];
+            if (GetInventoryItemCount(versatileLure.Id) > 0)
+                return versatileLure.Id;
+
+            var firstBait = GatherBuddy.GameData.Bait.FirstOrDefault();
+            if (GetInventoryItemCount(firstBait.Value.Id) > 0)
+                return firstBait.Value.Id;
+
+            return 0;
+        }
 
         private bool HasPatienceStatus()
         {
@@ -342,10 +370,8 @@ namespace GatherBuddy.AutoGather
             return null;
         }
 
-        private unsafe void DoGatherWindowActions(GatherTarget target)
+        private unsafe void DoGatherWindowActions(IEnumerable<GatherTarget> target)
         {
-            System.Diagnostics.Debug.Assert(target == default || target.Gatherable != null);
-
             if (GatheringWindowReader == null)
                 return;
 
@@ -355,24 +381,24 @@ namespace GatherBuddy.AutoGather
             }
             LastIntegrity = GatheringWindowReader.IntegrityRemaining;
 
-            //Use The Giving Land out of order to gather random crystals.
-            if (target != default && ShouldUseGivingLandOutOfOrder(target.Gatherable))
+            foreach (var t in target)
             {
-                EnqueueActionWithDelay(() => UseAction(Actions.GivingLand));
-                return;
+                //Use The Giving Land out of order to gather random crystals.
+                if (ShouldUseGivingLandOutOfOrder(t.Gatherable))
+                {
+                    EnqueueActionWithDelay(() => UseAction(Actions.GivingLand));
+                    return;
+                }
             }
 
-            if (!LuckUsed && GatheringWindowReader.HasUnhidden)
+            foreach (var t in target)
             {
-                // If there are unhidden items, Luck skill won't reveal anything new.
-                LuckUsed = true;
-            }
-
-            if (target != default && !HasGivingLandBuff && ShouldUseLuck(target.Gatherable))
-            {
-                LuckUsed = true;
-                EnqueueActionWithDelay(() => UseAction(Actions.Luck));
-                return;
+                if (!HasGivingLandBuff && ShouldUseLuck(t.Gatherable))
+                {
+                    LuckUsed = true;
+                    EnqueueActionWithDelay(() => UseAction(Actions.Luck));
+                    return;
+                }
             }
 
             var (useSkills, slot) = GetItemSlotToGather(target);
@@ -406,7 +432,7 @@ namespace GatherBuddy.AutoGather
                                         ActionSequence = task.Result.GetEnumerator();
                                     return task.IsCompleted;
                                 });
-                                AutoStatus = "正在计算最佳技能序列...";
+                                AutoStatus = "Calculating best action sequence...";
                                 return;
                             }
                         }
@@ -462,7 +488,7 @@ namespace GatherBuddy.AutoGather
         {
             if (GatherBuddy.Config.AutoGatherConfig.UseGivingLandOnCooldown
              && desiredItem != null
-             && desiredItem.NodeType == Enums.NodeType.常规)
+             && desiredItem.NodeType == Enums.NodeType.Regular)
             {
                 var anyCrystal = GetAnyCrystalInNode();
                 return anyCrystal != null && ShouldUseGivingLand(anyCrystal, MatchConfigPreset(anyCrystal.Item));
@@ -552,9 +578,9 @@ namespace GatherBuddy.AutoGather
                 return false;
 
             var yield = slot.Yield;
-            if (Dalamud.Objects.LocalPlayer!.StatusList.Any(s => s.StatusId == Actions.Bountiful.EffectId))
+            if (Dalamud.ClientState.LocalPlayer!.StatusList.Any(s => s.StatusId == Actions.Bountiful.EffectId))
                 yield -= 1;
-            if (Dalamud.Objects.LocalPlayer!.StatusList.Any(s => s.StatusId == Actions.BountifulII.EffectId))
+            if (Dalamud.ClientState.LocalPlayer!.StatusList.Any(s => s.StatusId == Actions.BountifulII.EffectId))
                 yield -= CalculateBountifulBonus(slot.Item);
             if (yield < config.SolidAge.MinYieldTotal)
                 return false;
@@ -565,7 +591,7 @@ namespace GatherBuddy.AutoGather
         private bool CheckConditions(Actions.BaseAction action, ConfigPreset.ActionConfig config, Gatherable item, ItemSlot slot,
             bool autoMode = false)
         {
-            if (GatheringWindowReader == null || Player.Object == null)
+            if (GatheringWindowReader == null)
                 return false;
             // autoMode = true is used for TGL out-of-order check that occurs before the rotation solver kicks in.
             if (config.Enabled == false && !autoMode)
@@ -587,7 +613,11 @@ namespace GatherBuddy.AutoGather
             if (action.EffectType is Actions.EffectType.Integrity && GatheringWindowReader.IntegrityRemaining > Math.Min(2, GatheringWindowReader.IntegrityMax - 1))
                 return false;
             if (action.EffectType is not Actions.EffectType.Other and not Actions.EffectType.GatherChance && slot.IsRare)
+            {
+                var isUmbralItem = Data.UmbralNodes.IsUmbralItem(item.ItemId);
+                if (!isUmbralItem)
                     return false;
+            }
             if (config is ConfigPreset.ActionConfigIntegrity config2
              && (!autoMode && config2.MinIntegrity > GatheringWindowReader.IntegrityMax || (config2.FirstStepOnly || autoMode) && GatheringWindowReader.Touched))
                 return false;

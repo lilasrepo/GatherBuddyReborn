@@ -1,7 +1,7 @@
-using Dalamud.Interface.Textures;
+﻿using Dalamud.Interface.Textures;
 using Dalamud.Plugin.Services;
 using GatherBuddy.Enums;
-using ElliLib.Classes;
+using OtterGui.Classes;
 
 namespace GatherBuddy;
 

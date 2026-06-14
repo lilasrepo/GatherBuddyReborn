@@ -1,10 +1,11 @@
 using System;
 using System.Threading.Tasks;
 using Dalamud.Game.ClientState.Conditions;
-using GatherBuddy.Automation;
+using ECommons.Automation;
+using ECommons.DalamudServices;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using GatherBuddy.Plugin;
-using static GatherBuddy.Automation.AddonMaster;
+using static ECommons.UIHelpers.AddonMasterImplementations.AddonMaster;
 
 namespace GatherBuddy.AutoGather;
 
@@ -36,25 +37,28 @@ public partial class AutoGather
         }
     }
 
+    private Random _rng = new();
     unsafe void DoMateriaExtraction()
     {
         if (!QuestManager.IsQuestComplete(66174))
         {
             GatherBuddy.Config.AutoGatherConfig.DoMaterialize = false;
-            Communicator.PrintError("[GatherBuddy Reborn] 无法自动精制魔晶石, 精制任务尚未完成。此功能已停用。");
+            Communicator.PrintError("[GatherBuddy Reborn] Materia Extraction enabled but relevant quest not complete yet. Feature disabled.");
             return;
         }
         if (MaterializeAddon == null)
         {
-            StopNavigation();
+            TaskManager.Enqueue(StopNavigation);
             EnqueueActionWithDelay(() => ActionManager.Instance()->UseAction(ActionType.GeneralAction, 14));
-            TaskManager.Enqueue(() => MaterializeAddon != null, "精魔晶石界面已打开");
+            TaskManager.Enqueue(() => MaterializeAddon != null);
             return;
         }
 
         EnqueueActionWithDelay(() => { if (MaterializeAddon is var addon and not null) Callback.Fire(&addon->AtkUnitBase, true, 2, 0); });
-        TaskManager.Enqueue(() => !Dalamud.Conditions[ConditionFlag.Occupied39], "等待占用状态解除");
-        EnqueueActionWithDelay(() => { });
+        TaskManager.Enqueue(() => MaterializeDialogAddon != null, 1000);
+        EnqueueActionWithDelay(() => { if (MaterializeDialogAddon is var addon and not null) new MaterializeDialog(addon).Materialize(); });
+        TaskManager.Enqueue(() => !Svc.Condition[ConditionFlag.Occupied39]);
+        TaskManager.DelayNext(_rng.Next(500, 2000));
 
         if (SpiritbondMax == 1) 
         {

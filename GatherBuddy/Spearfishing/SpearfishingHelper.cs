@@ -51,7 +51,7 @@ public partial class SpearfishingHelper
         if (Dalamud.Targets.Target.ObjectKind != ObjectKind.GatheringPoint)
             return null;
 
-        var id = Dalamud.Targets.Target.BaseId;
+        var id = Dalamud.Targets.Target.DataId;
         return SpearfishingSpots.GetValueOrDefault(id);
     }
 
@@ -59,7 +59,7 @@ public partial class SpearfishingHelper
     // This may result in more than one fish, but does so rarely. Unknown attributes are seen as valid for any attribute.
     private static string Identify(FishingSpot? spot, SpearfishWindow.Info info)
     {
-        const string unknown = "未知鱼类";
+        const string unknown = "Unknown Fish";
 
         if (spot == null)
             return unknown;

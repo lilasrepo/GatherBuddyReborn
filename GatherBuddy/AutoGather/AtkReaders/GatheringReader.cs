@@ -2,19 +2,16 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Linq;
-using GatherBuddy.Automation;
+using ECommons.Automation;
+using ECommons.DalamudServices;
+using ECommons.UIHelpers;
 using FFXIVClientStructs.FFXIV.Component.GUI;
-using System.Collections.Immutable;
+using GatherBuddy.Enums;
 
 namespace GatherBuddy.AutoGather.AtkReaders;
 
-public unsafe class GatheringReader : AtkReader
+public unsafe class GatheringReader(AtkUnitBase* addon) : AtkReader(addon)
 {
-    public GatheringReader(AtkUnitBase* addon) : base(addon)
-    {
-        ItemSlots = [.. ItemSlotReaders.Select((slot, i) => new ItemSlot(i, slot, ItemSlotFlags, GatherChances, ItemLevel))];
-    }
-
     private uint GatherChancesRaw1
         => ReadUInt(1).GetValueOrDefault();
 
@@ -33,10 +30,24 @@ public unsafe class GatheringReader : AtkReader
     private uint ItemLevel
         => (ItemLevelRaw1 != 0 && ItemLevelRaw1 != 0xFFFFFFFF ? BinaryPrimitives.ReverseEndianness(ItemLevelRaw1) : BinaryPrimitives.ReverseEndianness(ItemLevelRaw2));
 
-    private IEnumerable<ItemSlotReader> ItemSlotReaders
+    private List<ItemSlotReader> ItemSlotReaders
         => Loop<ItemSlotReader>(5, 11, 8);
 
-    public readonly ImmutableArray<ItemSlot> ItemSlots;
+    public List<ItemSlot> ItemSlots
+    {
+        get
+        {
+            var result = new List<ItemSlot>();
+            for (var i = 0; i < 8; ++i)
+            {
+                var slot = ItemSlotReaders[i];
+                Svc.Log.Debug($"GatheringReader: Slot {i} - Item: {slot.Item?.Name.English ?? "None"} - HasBonus: {slot.HasBonus} - RequiresPerception: {slot.RequiresPerception} - HasGivingLandBuff: {slot.HasGivingLandBuff} - IsCollectable: {slot.IsCollectable} - Yield: {slot.Yield} - BoonChance: {slot.BoonChance}");
+                result.Add(new ItemSlot(i, slot, ItemSlotFlags, GatherChances, ItemLevel));
+            }
+
+            return result;
+        }
+    }
 
     private uint ItemSlotFlags
         => ReadUInt(98).GetValueOrDefault();
@@ -62,6 +73,6 @@ public unsafe class GatheringReader : AtkReader
     public bool Touched
         => IntegrityRemaining != IntegrityMax;
 
-    public bool HasUnhidden
-        => ItemSlots.Any(i => !i.IsEmpty && i.IsHidden);
+    public bool HiddenRevealed
+        => ItemSlots.Any(i => i.IsHidden);
 }

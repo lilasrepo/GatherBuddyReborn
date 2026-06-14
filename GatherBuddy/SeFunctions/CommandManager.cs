@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
+using Dalamud.Game;
 using Dalamud.Plugin.Services;
 
 namespace GatherBuddy.SeFunctions;

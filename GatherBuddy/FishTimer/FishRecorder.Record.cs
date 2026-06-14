@@ -4,9 +4,10 @@ using System.Linq;
 using System.Threading.Tasks;
 using Dalamud.Game;
 using Dalamud.Plugin.Services;
+using ECommons.ExcelServices;
+using ECommons.GameHelpers;
+using ECommons.MathHelpers;
 using GatherBuddy.Classes;
-using GatherBuddy.Helpers;
-using GatherBuddy.Utilities;
 using GatherBuddy.Enums;
 using GatherBuddy.FishTimer.Parser;
 using GatherBuddy.Models;
@@ -55,7 +56,7 @@ public partial class FishRecorder
             if (GatherBuddy.GameData.Fishes.TryGetValue(fishId, out var fish))
                 return new Bait(fish.ItemData);
 
-            GatherBuddy.Log.Error($"ID 为 {fishId} 的物品不是可用作钓饵的已知鱼类");
+            GatherBuddy.Log.Error($"Item with id {fishId} is not a known type of fish to be used as bait.");
             return Bait.Unknown;
         }
 
@@ -63,16 +64,16 @@ public partial class FishRecorder
         if (GatherBuddy.GameData.Bait.TryGetValue(baitId, out var bait))
             return bait;
 
-        GatherBuddy.Log.Error($"ID 为 {baitId} 的物品不是已知类型的钓饵");
+        GatherBuddy.Log.Error($"Item with id {baitId} is not a known type of bait.");
         return Bait.Unknown;
     }
 
     private void CheckBuffs()
     {
-        if (Dalamud.Objects.LocalPlayer?.StatusList is not {} statusList)
+        if (Dalamud.ClientState.LocalPlayer?.StatusList == null)
             return;
 
-        foreach (var buff in statusList)
+        foreach (var buff in Dalamud.ClientState.LocalPlayer.StatusList)
         {
             Record.Flags |= buff.StatusId switch
             {
@@ -97,10 +98,10 @@ public partial class FishRecorder
 
     private void UpdateLure()
     {
-        if (Dalamud.Objects.LocalPlayer?.StatusList is not { } statusList)
+        if (Dalamud.ClientState.LocalPlayer?.StatusList == null)
             return;
 
-        foreach (var buff in statusList)
+        foreach (var buff in Dalamud.ClientState.LocalPlayer.StatusList)
         {
             Record.Flags |= buff.StatusId switch
             {
@@ -120,13 +121,13 @@ public partial class FishRecorder
     }
 
     private static readonly uint GatheringIdx =
-        Dalamud.GameData.GetExcelSheet<BaseParam>((ClientLanguage)4).Cast<BaseParam?>()
-            .FirstOrDefault(r => r!.Value.Name == "获得力")?.RowId // 修改为中文
+        Dalamud.GameData.GetExcelSheet<BaseParam>(ClientLanguage.English).Cast<BaseParam?>()
+            .FirstOrDefault(r => r!.Value.Name == "Gathering")?.RowId
      ?? 72;
 
     private static readonly uint PerceptionIdx =
-        Dalamud.GameData.GetExcelSheet<BaseParam>((ClientLanguage)4).Cast<BaseParam?>()
-            .FirstOrDefault(r => r!.Value.Name == "鉴别力")?.RowId // 修改为中文
+        Dalamud.GameData.GetExcelSheet<BaseParam>(ClientLanguage.English).Cast<BaseParam?>()
+            .FirstOrDefault(r => r!.Value.Name == "Perception")?.RowId
      ?? 73;
 
     private static int GetContentHash(ulong id)
@@ -182,16 +183,11 @@ public partial class FishRecorder
         Record.FishingSpot   = spot;
         Record.Position      = Player.Position;
         Record.RotationAngle = new Angle(Player.Rotation);
-        var worldName = Player.CurrentWorld;
-        if (worldName != null)
-        {
-            var world = Dalamud.GameData.GetExcelSheet<World>().FirstOrDefault(w => w.Name.ToString().Equals(worldName, StringComparison.OrdinalIgnoreCase));
-            Record.World = world;
-        }
+        Record.World         = ExcelWorldHelper.Get(Player.CurrentWorld)!.Value;
         if (Record.HasSpot)
             Step |= CatchSteps.IdentifiedSpot;
 
-        GatherBuddy.Log.Verbose($"开始在 {spot?.Name ?? "未知钓场"} 钓鱼，使用 {Record.Bait.Name}");
+        GatherBuddy.Log.Verbose($"Began fishing at {spot?.Name ?? "Undiscovered Fishing Hole"} using {Record.Bait.Name}.");
     }
 
     private void OnBite()
@@ -202,16 +198,16 @@ public partial class FishRecorder
         Step                 |= CatchSteps.FishBit;
         if (LureTimer.ElapsedMilliseconds > 0)
             GatherBuddy.Log.Verbose(
-                $"鱼在 {Timer.ElapsedMilliseconds} ms 后咬钩，咬钩类型 {Record.Tug}。距离上次撒饵: {LureTimer.ElapsedMilliseconds} ms");
+                $"Fish bit with {Record.Tug} after {Timer.ElapsedMilliseconds} ms. Time since last lure: {LureTimer.ElapsedMilliseconds} ms.");
         else
-            GatherBuddy.Log.Verbose($"鱼在 {Timer.ElapsedMilliseconds} ms 后咬钩，咬钩类型 {Record.Tug}");
+            GatherBuddy.Log.Verbose($"Fish bit with {Record.Tug} after {Timer.ElapsedMilliseconds} ms.");
     }
 
     private void OnIdentification(FishingSpot spot)
     {
         Record.FishingSpot =  spot;
         Step               |= CatchSteps.IdentifiedSpot;
-        GatherBuddy.Log.Verbose($"识别出之前未知的钓场为 {spot.Name}");
+        GatherBuddy.Log.Verbose($"Identified previously unknown fishing spot as {spot.Name}.");
     }
 
     private void OnHooking(HookSet hook)
@@ -219,7 +215,7 @@ public partial class FishRecorder
         if (!Step.HasFlag(CatchSteps.FishReeled) && !Step.HasFlag(CatchSteps.NoMoreHook))
         {
             Record.SetTugHook(Record.Tug, hook);
-            GatherBuddy.Log.Verbose($"使用 {hook} 提钩，咬钩类型 {Record.Tug}");
+            GatherBuddy.Log.Verbose($"Hooking {Record.Tug} tug with {hook}.");
         }
     }
 
@@ -234,7 +230,7 @@ public partial class FishRecorder
         if (collectible)
             Record.Flags |= Effects.Collectible;
         GatherBuddy.Log.Verbose(
-            $"钓到了 {amount} 条 {(large ? "大型 " : string.Empty)}{(collectible ? "收藏品 " : string.Empty)}{Record.Catch.Name[(ClientLanguage)4]}，大小 {size / 10f:F1}");
+            $"Caught {amount} {(large ? "large " : string.Empty)}{(collectible ? "collectible " : string.Empty)}{Record.Catch.Name[ClientLanguage.English]} of size {size / 10f:F1}.");
     }
 
     private void OnMooch()
@@ -250,7 +246,7 @@ public partial class FishRecorder
         Record.FishingSpot = spot;
         if (Record.HasSpot)
             Step |= CatchSteps.IdentifiedSpot;
-        GatherBuddy.Log.Verbose($"使用 {Record.Bait.Name} 以小钓大，位置 {spot?.Name ?? "未知钓场"}");
+        GatherBuddy.Log.Verbose($"Mooching with {Record.Bait.Name} at {spot?.Name ?? "Undiscovered Fishing Hole"}.");
     }
 
     private void OnFishingStop()
@@ -304,7 +300,7 @@ public partial class FishRecorder
 
     private void UpdateLureStatus()
     {
-        if (Dalamud.Objects.LocalPlayer?.StatusList.FirstOrDefault(s => s.StatusId is 3972 or 3973) is { } currentStatus
+        if (Dalamud.ClientState.LocalPlayer?.StatusList.FirstOrDefault(s => s.StatusId is 3972 or 3973) is { } currentStatus
          && currentStatus.Param != _currentLureStack)
         {
             _currentLureStack = (byte)currentStatus.Param;

@@ -1,4 +1,5 @@
-﻿using GatherBuddy.Enums;
+﻿using System;
+using GatherBuddy.Enums;
 
 namespace GatherBuddy.Classes;
 
@@ -26,24 +27,24 @@ public class OceanRoute
     public (FishingSpot Normal, FishingSpot Spectral) GetSpots(OceanTime time)
         => time switch
         {
-            OceanTime.白昼    => SpotDay,
-            OceanTime.日落 => SpotSunset,
-            OceanTime.夜晚  => SpotNight,
+            OceanTime.Day    => SpotDay,
+            OceanTime.Sunset => SpotSunset,
+            OceanTime.Night  => SpotNight,
             _                => throw new ArgumentOutOfRangeException(nameof(time)),
         };
 
     public (FishingSpot Normal, FishingSpot Spectral) GetSpots(int order)
         => (StartTime, order % 3) switch
         {
-            (OceanTime.白昼, 0)    => SpotSunset,
-            (OceanTime.白昼, 1)    => SpotNight,
-            (OceanTime.白昼, 2)    => SpotDay,
-            (OceanTime.日落, 0) => SpotNight,
-            (OceanTime.日落, 1) => SpotDay,
-            (OceanTime.日落, 2) => SpotSunset,
-            (OceanTime.夜晚, 0)  => SpotDay,
-            (OceanTime.夜晚, 1)  => SpotSunset,
-            (OceanTime.夜晚, 2)  => SpotNight,
+            (OceanTime.Day, 0)    => SpotSunset,
+            (OceanTime.Day, 1)    => SpotNight,
+            (OceanTime.Day, 2)    => SpotDay,
+            (OceanTime.Sunset, 0) => SpotNight,
+            (OceanTime.Sunset, 1) => SpotDay,
+            (OceanTime.Sunset, 2) => SpotSunset,
+            (OceanTime.Night, 0)  => SpotDay,
+            (OceanTime.Night, 1)  => SpotSunset,
+            (OceanTime.Night, 2)  => SpotNight,
             _                     => throw new ArgumentOutOfRangeException(nameof(StartTime)),
         };
 

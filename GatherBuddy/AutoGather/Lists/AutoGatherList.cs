@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics.CodeAnalysis;
@@ -33,7 +33,6 @@ public class AutoGatherList
     public int    Order       { get; set; } = 0;
     public bool   Enabled     { get; set; } = false;
     public bool   Fallback    { get; set; } = false;
-    public bool   RemoveCompletedItems { get; set; } = false;
 
     private List<IGatherable>                  items              = [];
     private Dictionary<IGatherable, uint>      quantities         = [];
@@ -52,8 +51,7 @@ public class AutoGatherList
             FolderPath         = FolderPath,
             Order              = Order,
             Enabled            = false,
-            Fallback           = Fallback,
-            RemoveCompletedItems = RemoveCompletedItems
+            Fallback           = Fallback
         };
 
     public bool Add(IGatherable item, uint quantity = 1)
@@ -134,6 +132,8 @@ public class AutoGatherList
             quantity = 1;
         if (quantity > 999999)
             quantity = 999999;
+        if (quantity > 1 && item.IsTreasureMap)
+            quantity = 1;
         return quantity;
     }
 
@@ -161,7 +161,7 @@ public class AutoGatherList
 
     public struct Config(AutoGatherList list)
     {
-        public const byte CurrentVersion = 6;
+        public const byte CurrentVersion = 5;
 
         public uint[]                 ItemIds            = list.Items.Select(i => i.ItemId).ToArray();
         public Dictionary<uint, uint> Quantities         = list.Quantities.ToDictionary(v => v.Key.ItemId, v => v.Value);
@@ -173,7 +173,6 @@ public class AutoGatherList
         public int                    Order              = list.Order;
         public bool                   Enabled            = list.Enabled;
         public bool                   Fallback           = list.Fallback;
-        public bool                   RemoveCompletedItems = list.RemoveCompletedItems;
 
         internal readonly string ToBase64()
         {
@@ -189,7 +188,7 @@ public class AutoGatherList
             try
             {
                 var bytes = Functions.DecompressedBase64(data);
-                if (bytes.Length == 0 || (bytes[0] != CurrentVersion && bytes[0] != 5 && bytes[0] != 4))
+                if (bytes.Length == 0 || (bytes[0] != CurrentVersion && bytes[0] != 4))
                     return false;
 
                 var json = Encoding.UTF8.GetString(bytes.AsSpan()[1..]);
@@ -214,9 +213,9 @@ public class AutoGatherList
     public static bool FromConfig(Config cfg, out AutoGatherList list)
     {
         //Migrate Individual Enabled
-        if (cfg.EnabledItems == null || cfg.EnabledItems.Count == 0)
+        if ((cfg.EnabledItems?.Count ?? 0) == 0)
         {
-            cfg.EnabledItems = new(cfg.ItemIds.Length);
+            cfg.EnabledItems = new Dictionary<uint, bool>(cfg.ItemIds.Length);
             foreach (var item in cfg.ItemIds)
             {
                 cfg.EnabledItems[item] = true;
@@ -231,7 +230,6 @@ public class AutoGatherList
             Order              = cfg.Order,
             Enabled            = cfg.Enabled,
             Fallback           = cfg.Fallback,
-            RemoveCompletedItems = cfg.RemoveCompletedItems,
             items              = new(cfg.ItemIds.Length),
             quantities         = new(cfg.ItemIds.Length),
             preferredLocations = new(cfg.PrefferedLocations.Count),
@@ -241,21 +239,13 @@ public class AutoGatherList
         foreach (var itemId in cfg.ItemIds)
         {
             uint quantity;
-            IGatherable? item;
-
-            if (GatherBuddy.GameData.Gatherables.TryGetValue(itemId, out var gatherable))
-                item = gatherable;
-            else if (GatherBuddy.GameData.Fishes.TryGetValue(itemId, out var fish))
-                item = fish;
-            else
-                continue;
-
-            if (list.Add(item, quantity = cfg.Quantities.GetValueOrDefault(item.ItemId)))
+            if (GatherBuddy.GameData.Gatherables.TryGetValue(itemId, out var item)
+             && list.Add(item, quantity = cfg.Quantities.GetValueOrDefault(item.ItemId)))
             {
                 changes |= list.quantities[item] != quantity;
                 if (cfg.PrefferedLocations.TryGetValue(itemId, out var locId))
                 {
-                    if (item.Locations.FirstOrDefault(n => n.Id == locId) is var loc and not null)
+                    if (item.NodeList.FirstOrDefault(n => n.Id == locId) is var loc and not null)
                         list.SetPreferredLocation(item, loc);
                     else
                         changes = true;
@@ -263,6 +253,19 @@ public class AutoGatherList
 
                 if (cfg.EnabledItems.TryGetValue(itemId, out var enabled))
                     list.SetEnabled(item, enabled);
+            }
+
+            if (GatherBuddy.GameData.Fishes.Where(f => !f.Value.IsTreasureMap).ToDictionary().TryGetValue(itemId, out var fish)
+             && list.Add(fish, quantity = cfg.Quantities.GetValueOrDefault(fish.ItemId)))
+            {
+                changes |= list.quantities[fish] != quantity;
+
+                if (cfg.EnabledItems.TryGetValue(itemId, out var enabled))
+                    list.SetEnabled(fish, enabled);
+            }
+            else
+            {
+                changes = true;
             }
         }
 

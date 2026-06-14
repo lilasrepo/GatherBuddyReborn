@@ -30,13 +30,13 @@ public static class ForcedAetherytes
             var territory     = data.FindOrAddTerritory(territoryType);
             if (territory == null)
             {
-                data.Log.Error($"找不到区域 {zoneId}.");
+                data.Log.Verbose($"Could not find territory {zoneId}.");
                 continue;
             }
 
             if (!data.Aetherytes.TryGetValue(aetheryteId, out var aetheryte))
             {
-                data.Log.Error($"找不到以太之光 {aetheryteId}.");
+                data.Log.Verbose($"Could not find aetheryte {aetheryteId}.");
                 continue;
             }
 
@@ -60,13 +60,13 @@ public static class ForcedAetherytes
         {
             if (!data.GatheringNodes.TryGetValue(nodeId, out var node))
             {
-                data.Log.Error($"找不到采集点 {nodeId}.");
+                data.Log.Verbose($"Could not find node {nodeId}.");
                 continue;
             }
 
             if (!data.Aetherytes.TryGetValue(aetheryteId, out var aetheryte))
             {
-                data.Log.Error($"找不到以太之光 {aetheryteId}.");
+                data.Log.Verbose($"Could not find aetheryte {aetheryteId}.");
                 continue;
             }
 
