@@ -16,11 +16,13 @@ namespace GatherBuddy.AutoGather.Lists;
 
 public class ManualOrderSortMode : ISortMode<AutoGatherList>
 {
-    public string Name
-        => "Manual Order";
+    // OtterGui HEAD moved ISortMode<T> to UTF-8 spans (SortMode.cs:17-18); its own
+    // built-in modes use u8 literals the same way.
+    public ReadOnlySpan<byte> Name
+        => "Manual Order"u8;
 
-    public string Description
-        => "Sort by manually assigned order, with folders first.";
+    public ReadOnlySpan<byte> Description
+        => "Sort by manually assigned order, with folders first."u8;
 
     public IEnumerable<FileSystem<AutoGatherList>.IPath> GetChildren(FileSystem<AutoGatherList>.Folder folder)
     {

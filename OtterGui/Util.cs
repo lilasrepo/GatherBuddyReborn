@@ -3,7 +3,7 @@ using Dalamud.Interface.Components;
 using Dalamud.Interface.Textures;
 using Dalamud.Interface.Textures.TextureWraps;
 using Dalamud.Interface.Utility;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using OtterGui.Raii;
 using OtterGui.Text;
 
@@ -250,7 +250,7 @@ public static partial class ImGuiUtil
     // It has a centered 'Understood' button to close the window.
     public static void HelpPopup(string label, Vector2 size, Action content)
     {
-        ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Always, new Vector2(0.5f));
+        ImGui.SetNextWindowPos(ImGui.GetCenter(ImGui.GetMainViewport()), ImGuiCond.Always, new Vector2(0.5f));
         ImGui.SetNextWindowSize(size);
         using var pop = ImRaii.Popup(label, ImGuiWindowFlags.Modal | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoMove);
         if (pop)
@@ -389,7 +389,7 @@ public static partial class ImGuiUtil
     }
 
     public static bool DrawEditButtonText(int id, string current, out string newText, ref bool edit, Vector2 buttonSize, float inputWidth,
-        uint maxLength = 256)
+        int maxLength = 256)
     {
         newText = current;
         var       tmpEdit = edit;
@@ -422,23 +422,23 @@ public static partial class ImGuiUtil
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public static void HoverIcon(IDalamudTextureWrap icon, Vector2 iconSize)
-        => HoverIcon(icon.ImGuiHandle, icon.Size, iconSize);
+        => HoverIcon(icon.Handle, icon.Size, iconSize);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public static void HoverIcon(ISharedImmediateTexture icon, Vector2 iconSize)
     {
         if (icon.TryGetWrap(out var wrap, out _))
-            HoverIcon(wrap.ImGuiHandle, wrap.Size, iconSize);
+            HoverIcon(wrap.Handle, wrap.Size, iconSize);
         else
             ImGui.Dummy(iconSize);
     }
 
 
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
-    public static void HoverIcon(nint ptr, Vector2 contentSize, Vector2 iconSize)
+    public static void HoverIcon(ImTextureID id, Vector2 contentSize, Vector2 iconSize)
     {
-        ImGui.Image(ptr, iconSize);
-        HoverIconTooltip(ptr, iconSize, contentSize);
+        ImGui.Image(id, iconSize);
+        HoverIconTooltip(id, iconSize, contentSize);
     }
 
     public static void HoverIconTooltip(IDalamudTextureWrap icon, Vector2 iconSize)
@@ -452,13 +452,13 @@ public static partial class ImGuiUtil
 
         using var enable = ImRaii.Enabled();
         ImGui.BeginTooltip();
-        ImGui.Image(icon.ImGuiHandle, size);
+        ImGui.Image(icon.Handle, size);
         if (text.Length > 0)
             ImGui.TextUnformatted(text);
         ImGui.EndTooltip();
     }
 
-    public static void HoverIconTooltip(nint icon, Vector2 iconSize, Vector2 size)
+    public static void HoverIconTooltip(ImTextureID icon, Vector2 iconSize, Vector2 size)
     {
         if (iconSize.X > size.X || iconSize.Y > size.Y || !ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
             return;
@@ -539,12 +539,7 @@ public static partial class ImGuiUtil
     /// Input an ushort.
     /// </summary>
     public static unsafe bool InputUInt16(string label, ref ushort v, ImGuiInputTextFlags flags)
-    {
-        fixed (ushort* v2 = &v)
-        {
-            return ImGui.InputScalar(label, ImGuiDataType.U16, (nint)v2, nint.Zero, nint.Zero, "%hu", flags);
-        }
-    }
+        => ImUtf8.InputScalar(label, ref v, flags: flags);
 
     /// <inheritdoc cref="ColorIntensity(Vector4)"/>
     public static float ColorIntensity(uint color)
@@ -573,7 +568,7 @@ public static partial class ImGuiUtil
     /// <seealso cref="Text.EndObjects.DragDropTarget.CheckPayload(ReadOnlySpan{byte}, ImGuiDragDropFlags)"/>
     [MethodImpl(MethodImplOptions.AggressiveInlining | MethodImplOptions.AggressiveOptimization)]
     public static unsafe bool IsDropping(string name)
-        => ImGui.AcceptDragDropPayload(name).NativePtr != null;
+        => !ImGui.AcceptDragDropPayload(name).IsNull;
 
     /// <summary> Make a single-button color picker with a contrasted letter centered on it. </summary>
     public static bool ColorPicker(string label, string tooltip, Vector3 input, Action<Vector3> setter, string letter = "")
@@ -581,10 +576,10 @@ public static partial class ImGuiUtil
         var ret = false;
         if (ImGui.ColorEdit3(label, ref input,
                 ImGuiColorEditFlags.NoInputs
-              | ImGuiColorEditFlags.DisplayRGB
-              | ImGuiColorEditFlags.InputRGB
+              | ImGuiColorEditFlags.DisplayRgb
+              | ImGuiColorEditFlags.InputRgb
               | ImGuiColorEditFlags.NoTooltip
-              | ImGuiColorEditFlags.HDR))
+              | ImGuiColorEditFlags.Hdr))
         {
             setter(input);
             ret = true;

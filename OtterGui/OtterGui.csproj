@@ -23,7 +23,7 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <DalamudLibPath>$(MSBuildThisFileDirectory)..\..\..\TC_ok\_dalamud_api12\</DalamudLibPath>
+    <DalamudLibPath>$(MSBuildThisFileDirectory)..\..\..\TC_ok\_dalamud_api13\</DalamudLibPath>
   </PropertyGroup>
 
   <ItemGroup>
@@ -45,8 +45,12 @@
       <HintPath>$(DalamudLibPath)Dalamud.dll</HintPath>
     </Reference>
     <Reference Include="ImGui.NET" Private="false">
-      <HintPath>$(DalamudLibPath)ImGui.NET.dll</HintPath>
+      <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImGui.dll</HintPath>
     </Reference>
+        <Reference Include="Dalamud.Bindings.ImPlot">
+            <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImPlot.dll</HintPath>
+            <Private>False</Private>
+        </Reference>
     <Reference Include="ImGuiScene" Private="false">
       <HintPath>$(DalamudLibPath)ImGuiScene.dll</HintPath>
     </Reference>

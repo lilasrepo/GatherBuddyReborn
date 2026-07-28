@@ -1,5 +1,5 @@
 using Dalamud.Game.ClientState.Objects.Enums;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using OtterGui.Raii;
 
 namespace OtterGui.Custom;
@@ -33,7 +33,6 @@ public static class IndividualHelpers
             ObjectKind.None      => "Unknown",
             ObjectKind.BattleNpc => "Battle NPC",
             ObjectKind.EventNpc  => "Event NPC",
-            ObjectKind.MountType => "Mount",
             ObjectKind.Companion => "Companion",
             ObjectKind.Ornament  => "Accessory",
             _                    => kind.ToString(),

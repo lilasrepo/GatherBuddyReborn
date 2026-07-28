@@ -46,6 +46,16 @@ public readonly struct MultiString(string en, string de, string fr, string jp, s
         return new MultiString(en, de, fr, jp, chs);
     }
 
+    // porting-note(api13): api13's ClientLanguage grew Korean=6 and TraditionalChinese=7 on top of
+    // ChineseSimplified=4 / ChineseTraditional=5, and the TC client now reports TraditionalChinese
+    // where api12 reported ChineseSimplified. That fell straight into the old `throw`, which killed
+    // GatherBuddy at construction (Identificator.CreateGatherableDictionary -> ArgumentException).
+    // All Chinese/Korean values map to the single non-Western slot the sheets were actually read
+    // with, and an unrecognised future value falls back to English instead of throwing -- a name
+    // lookup must never be able to fail plugin load.
+    // RUNTIME-VERIFY: the From* helpers still read that slot with the literal (ClientLanguage)4,
+    // which is the value proven to work on the TC client under api12. If in-game names come out
+    // empty or English, switch those reads to the client's own IDataManager.Language.
     private string Name(ClientLanguage lang)
         => lang switch
         {
@@ -53,8 +63,9 @@ public readonly struct MultiString(string en, string de, string fr, string jp, s
             ClientLanguage.German   => German,
             ClientLanguage.Japanese => Japanese,
             ClientLanguage.French   => French,
-            (ClientLanguage)4       => ChineseSimplified,
-            _                       => throw new ArgumentException(),
+            ClientLanguage.ChineseSimplified or ClientLanguage.ChineseTraditional
+                or ClientLanguage.Korean or ClientLanguage.TraditionalChinese => ChineseSimplified,
+            _                       => English,
         };
 
     public static readonly MultiString Empty = new(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);

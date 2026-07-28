@@ -6,7 +6,7 @@ using System.Numerics;
 using Dalamud.Game.ClientState.Objects.Enums;
 using GatherBuddy.AutoGather;
 using System.Text.RegularExpressions;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using Dalamud.Game;
 using ECommons.DalamudServices;
 using GatherBuddy.Classes;
@@ -219,19 +219,19 @@ public partial class Interface
             }
 
             if (FishTimerWindow.CollectableIcon.TryGetWrap(out var wrapCollectable, out _))
-                ImGui.Image(wrapCollectable.ImGuiHandle, wrapCollectable.Size);
+                ImGui.Image(wrapCollectable.Handle, wrapCollectable.Size);
 
             ImGui.SameLine();
             if (FishTimerWindow.DoubleHookIcon.TryGetWrap(out var wrapDoubleHook, out _))
-                ImGui.Image(wrapDoubleHook.ImGuiHandle, wrapDoubleHook.Size);
+                ImGui.Image(wrapDoubleHook.Handle, wrapDoubleHook.Size);
 
             ImGui.SameLine();
             if (FishTimerWindow.TripleHookIcon.TryGetWrap(out var wrapTripleHook, out _))
-                ImGui.Image(wrapTripleHook.ImGuiHandle, wrapTripleHook.Size);
+                ImGui.Image(wrapTripleHook.Handle, wrapTripleHook.Size);
 
             ImGui.SameLine();
             if (FishTimerWindow.QuadHookIcon.TryGetWrap(out var wrapQuadHook, out _))
-                ImGui.Image(wrapQuadHook.ImGuiHandle, wrapQuadHook.Size);
+                ImGui.Image(wrapQuadHook.Handle, wrapQuadHook.Size);
         }
     }
 

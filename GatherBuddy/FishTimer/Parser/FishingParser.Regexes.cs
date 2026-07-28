@@ -22,8 +22,15 @@ public partial class FishingParser
                 ClientLanguage.German   => German.Value,
                 ClientLanguage.French   => French.Value,
                 ClientLanguage.Japanese => Japanese.Value,
-                (ClientLanguage)4       => ChineseSimplified.Value,
-                _                       => throw new InvalidEnumArgumentException(),
+                // porting-note(api13): the TC client reports ClientLanguage.TraditionalChinese(7) now that
+                // api13 added it; under api12 it reported ChineseSimplified(4). The old throw fired during
+                // parser construction. Never throw here -- fall back to English so the plugin still loads.
+                // RUNTIME-VERIFY: these patterns are Simplified (upstream wrote them for the CN client), so
+                // they may not match TC's Traditional fishing log. If the bite timer stays idle, capture the
+                // actual TC log lines and rewrite the patterns from that text rather than transliterating.
+                ClientLanguage.ChineseSimplified or ClientLanguage.ChineseTraditional
+                    or ClientLanguage.TraditionalChinese => ChineseSimplified.Value,
+                _                       => English.Value,
             };
         }
 

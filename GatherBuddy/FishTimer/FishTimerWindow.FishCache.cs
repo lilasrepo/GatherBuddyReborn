@@ -8,7 +8,7 @@ using System;
 using System.Linq;
 using System.Numerics;
 using System.Reflection;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using OtterGui.Text;
 using static GatherBuddy.Gui.Interface;
 using ImRaii = OtterGui.Raii.ImRaii;
@@ -217,7 +217,7 @@ public partial class FishTimerWindow
 
             // Icon
             if (_icon.TryGetWrap(out var wrap, out _))
-                ImGui.Image(wrap.ImGuiHandle, window._iconSize);
+                ImGui.Image(wrap.Handle, window._iconSize);
             else
                 ImGui.Dummy(window._iconSize);
 
@@ -268,7 +268,7 @@ public partial class FishTimerWindow
 
                 if (hookIcon?.TryGetWrap(out var wrap2, out _) ?? false)
                 {
-                    ImGui.Image(wrap2.ImGuiHandle, window._iconSize);
+                    ImGui.Image(wrap2.Handle, window._iconSize);
                     if (ImGui.IsItemHovered())
                     {
                         using var tooltip = ImRaii.Tooltip();
@@ -309,7 +309,7 @@ public partial class FishTimerWindow
 
                 ImGui.SameLine(window._windowSize.X - window._iconSize.X - (multiHook ? window._iconSize.X : 0));
                 if (CollectableIcon.TryGetWrap(out var wrap3, out _))
-                    ImGui.Image(wrap3.ImGuiHandle, window._iconSize, Vector2.Zero, Vector2.One, tint);
+                    ImGui.Image(wrap3.Handle, window._iconSize, Vector2.Zero, Vector2.One, tint);
                 else
                     ImGui.Dummy(window._iconSize);
             }

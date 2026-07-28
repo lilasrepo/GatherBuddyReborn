@@ -1,4 +1,4 @@
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using OtterGui.Extensions;
 using OtterGui.Filesystem;
 using OtterGui.Raii;
@@ -182,7 +182,7 @@ public partial class FileSystemSelector<T, TStateStorage>
         if (ImGui.IsWindowAppearing())
             ImGui.SetKeyboardFocusHere(0);
         ImGui.TextUnformatted("Rename Search Path or Move:");
-        if (ImGui.InputText("##Rename", ref currentPath, 256, ImGuiInputTextFlags.EnterReturnsTrue))
+        if (ImUtf8.InputText("##Rename"u8, ref currentPath, ""u8, ImGuiInputTextFlags.EnterReturnsTrue))
         {
             _fsActions.Enqueue(() =>
             {

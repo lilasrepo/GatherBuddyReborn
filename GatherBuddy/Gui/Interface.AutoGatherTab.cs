@@ -13,7 +13,7 @@ using GatherBuddy.Data;
 using GatherBuddy.Config;
 using GatherBuddy.CustomInfo;
 using GatherBuddy.Plugin;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using OtterGui;
 using OtterGui.Widgets;
 using ImRaii = OtterGui.Raii.ImRaii;
@@ -345,7 +345,8 @@ public partial class Interface
                 if (source.Success)
                 {
                     _dragDropData = new AutoGatherListsDragDropData(list, item, i);
-                    unsafe { ImGui.SetDragDropPayload("AutoGatherListItem", IntPtr.Zero, 0); }
+                    // api13 binding takes ReadOnlySpan<byte> for the payload; OtterGui itself passes null
+                    unsafe { ImGui.SetDragDropPayload("AutoGatherListItem", null, 0); }
                     ImGui.TextUnformatted(item.Name[GatherBuddy.Language]);
                 }
             }
@@ -404,7 +405,7 @@ public partial class Interface
         using (var child = ImRaii.Child("AutoGatherListSelector", new Vector2(selectorWidth, -1), false))
         {
             if (child)
-                _autoGatherListsCache.Selector.Draw(selectorWidth);
+                _autoGatherListsCache.Selector.Draw();  // OtterGui HEAD sizes the selector internally (GetSizeInternal)
         }
 
         ImGui.SameLine();

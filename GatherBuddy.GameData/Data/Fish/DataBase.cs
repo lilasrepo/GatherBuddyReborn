@@ -330,9 +330,16 @@ public static partial class Fish
         if (fish == null)
             return null;
 
-        fish.CosmicMission = data.CosmicFishingMissions.TryGetValue(value, out var mission)
-            ? mission
-            : throw new Exception($"Could not find cosmic fishing mission {value}.");
+        // porting-note(api13): upstream throws here, asserting that its hardcoded Data7.x tables
+        // always match the live sheets. That assertion does not hold on TC, whose data version can
+        // carry a patch's items while still lacking rows the same patch added elsewhere -- and the
+        // throw happens inside GameData's constructor, so one absent row fails the whole plugin.
+        // Fish.CosmicMission is declared nullable and IsCosmicFish is `is not null`, so leaving it
+        // unset is a supported state: the fish is simply not treated as a cosmic fish.
+        if (data.CosmicFishingMissions.TryGetValue(value, out var mission))
+            fish.CosmicMission = mission;
+        else
+            data.Log.Verbose($"Could not find cosmic fishing mission {value}; leaving fish {fish.ItemId} non-cosmic.");
         return fish;
     }
 

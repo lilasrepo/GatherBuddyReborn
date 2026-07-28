@@ -1,7 +1,7 @@
 using System;
 using System.Linq;
 using System.Numerics;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using Dalamud.Game.Text;
 using Dalamud.Interface.Utility;
 using ECommons.DalamudServices;
@@ -1007,7 +1007,7 @@ public partial class Interface
                     
                     if (purchaseItem.Item != null && purchaseItem.Item.IconTexture.TryGetWrap(out var wrap, out _))
                     {
-                        ImGui.Image(wrap.ImGuiHandle, new Vector2(24, 24));
+                        ImGui.Image(wrap.Handle, new Vector2(24, 24));
                         ImGui.SameLine();
                     }
                     

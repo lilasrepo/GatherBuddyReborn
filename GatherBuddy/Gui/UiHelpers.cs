@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Numerics;
-using ImGuiNET;
+using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility;
 using GatherBuddy.Config;
 using GatherBuddy.Interfaces;

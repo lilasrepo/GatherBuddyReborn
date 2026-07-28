@@ -7,7 +7,7 @@ punchline: Simplify Gathering and Fishing.
 repo_url: https://github.com/FFXIV-CombatReborn/GatherBuddyReborn
 DalamudApiLevel: 12
 TestingDalamudApiLevel: 12
-dalamud_api_level: 12
+dalamud_api_level: 13
 tags:
   - Gathering
   - Fishing

@@ -142,11 +142,16 @@ public class GameData
             if (GatheringNodes.Count is 0)
                 throw new Exception("Could not fetch any gathering nodes, this is certainly an error, terminating.");
 
-            // API12 stub: Cosmic Exploration is a game-7.5 feature.
-            // WKSMissionUnit.Name and .ClassJobCategory don't exist in TC client's Lumina,
-            // and WKSItemInfo's Cosmic Exploration bait shouldn't materialize on a 7.1 client either.
-            CosmicFishingMissions = System.Collections.Frozen.FrozenDictionary<ushort, CosmicMission>.Empty;
-            Log.Verbose("Cosmic fishing missions skipped: API12 stub (game 7.5 Cosmic Exploration feature).");
+            // porting-note(api13): the api12 stub forced this empty because that Lumina only had
+            // WKSMissionUnit.Unknown0..20, with no Name/ClassJobCategory to filter on. api13's
+            // Lumina.Excel (7.3.1) names both, so this is upstream's own query again. It matters
+            // now rather than later: TC game v7.20 (data 2026.07.22) shipped the international-7.2
+            // Cosmic Exploration fish, so Fish.Apply() stopped returning null for them and the
+            // hardcoded Data7.2 table finally reached Fish.Mission() -- against an empty dictionary.
+            CosmicFishingMissions = DataManager.GetExcelSheet<WKSMissionUnit>()
+                .Where(m => m.Name.ByteLength > 0 && (m.ClassJobCategory[0].RowId is 19 || m.ClassJobCategory[1].RowId is 19))
+                .ToFrozenDictionary(m => (ushort)m.RowId, m => new CosmicMission(m));
+            Log.Verbose("Collected {NumCosmicMissions} different cosmic fishing missions.", CosmicFishingMissions.Count);
 
             Bait = DataManager.GetExcelSheet<Item>()
                 .Where(i => i.ItemSearchCategory.RowId == Structs.Bait.FishingTackleRow)
