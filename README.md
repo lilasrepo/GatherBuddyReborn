@@ -1,11 +1,11 @@
-# GatherBuddy Reborn（繁中移植版 · TC12） / Traditional-Chinese Port
+# GatherBuddy Reborn（繁中移植版 · TC13） / Traditional-Chinese Port
 
 > 簡化採集與釣魚。<br>
 > Simplify gathering and fishing.
 
-**繁體中文**：這是 **[GatherBuddy Reborn](https://github.com/FFXIV-CombatReborn/GatherBuddyReborn)** 的繁體中文客戶端移植版，對應 **FFXIV 7.1 / yanmucorp Dalamud API12（.NET 9）**。本專案僅做相容性移植，**非官方、非原作維護**；所有原始功能與設計著作權歸原作者 **The Combat Reborn Team**。
+**繁體中文**：這是 **[GatherBuddy Reborn](https://github.com/FFXIV-CombatReborn/GatherBuddyReborn)** 的繁體中文客戶端移植版，對應 **FFXIV 7.20 / yanmucorp Dalamud API13（.NET 9）**。本專案僅做相容性移植，**非官方、非原作維護**；所有原始功能與設計著作權歸原作者 **The Combat Reborn Team**。
 
-**English**: A Traditional-Chinese-client port of **[GatherBuddy Reborn](https://github.com/FFXIV-CombatReborn/GatherBuddyReborn)** targeting **FFXIV 7.1 / yanmucorp Dalamud API12 (.NET 9)**. Compatibility port only — **unofficial and not maintained by the original author**. All original work © **The Combat Reborn Team**.
+**English**: A Traditional-Chinese-client port of **[GatherBuddy Reborn](https://github.com/FFXIV-CombatReborn/GatherBuddyReborn)** targeting **FFXIV 7.20 / yanmucorp Dalamud API13 (.NET 9)**. Compatibility port only — **unofficial and not maintained by the original author**. All original work © **The Combat Reborn Team**.
 
 ---
 
@@ -24,7 +24,7 @@ Look up nodes, fish and their locations by item name, with a UI for tracking spe
    ```
    https://raw.githubusercontent.com/lilasrepo/DalamudPlugins/main/pluginmaster.json
    ```
-4. 輸入 `/xlplugins`，搜尋 **GatherBuddy Reborn (TC12)** → 安裝 → 啟用。
+4. 輸入 `/xlplugins`，搜尋 **GatherBuddy Reborn (TC13)** → 安裝 → 啟用。
 
 **English**
 1. Launch the Traditional-Chinese client with **XIVTCLauncher**.
@@ -33,14 +33,14 @@ Look up nodes, fish and their locations by item name, with a UI for tracking spe
    ```
    https://raw.githubusercontent.com/lilasrepo/DalamudPlugins/main/pluginmaster.json
    ```
-4. Type `/xlplugins`, search **GatherBuddy Reborn (TC12)** → Install → Enable.
+4. Type `/xlplugins`, search **GatherBuddy Reborn (TC13)** → Install → Enable.
 
 ## 對應版本 / Compatibility
 
 | 項目 / Item | 版本 / Version |
 |---|---|
-| 遊戲 / Game | FFXIV 7.1（繁中客戶端 / TC client） |
-| Dalamud | yanmucorp API12（.NET 9） |
+| 遊戲 / Game | FFXIV 7.20（繁中客戶端 / TC client） |
+| Dalamud | yanmucorp API13（.NET 9） |
 | 移植自上游 / Ported from upstream | v7.2.4.0 |
 
 ## 原作與授權 / Credits & License
