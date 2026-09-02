@@ -1,14 +1,11 @@
-using ECommons.DalamudServices;
 using GatherBuddy.Plugin;
 using Lumina.Excel.Sheets;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using System;
 using Dalamud.Game.ClientState.Conditions;
-using ECommons.UIHelpers.AddonMasterImplementations;
-using ECommons.Automation;
-using ECommons.ExcelServices;
-using ECommons.GameHelpers;
+using GatherBuddy.Automation;
+using GatherBuddy.Helpers;
 
 namespace GatherBuddy.AutoGather;
 
@@ -27,7 +24,7 @@ public unsafe partial class AutoGather
             {
                 if (equippedItem->Condition / 300 <= threshold)
                 {
-                    return Svc.Data.Excel.GetSheet<Item>().GetRow(equippedItem->ItemId);
+                    return Dalamud.GameData.Excel.GetSheet<Item>().GetRow(equippedItem->ItemId);
                 }
             }
         }
@@ -41,7 +38,7 @@ public unsafe partial class AutoGather
         {
             var repairJobLevel =
                 PlayerState.Instance()->ClassJobLevels[
-                    Svc.Data.GetExcelSheet<ClassJob>()?.GetRow(itemToRepair.ClassJobRepair.RowId).ExpArrayIndex ?? 0];
+                    Dalamud.GameData.GetExcelSheet<ClassJob>()?.GetRow(itemToRepair.ClassJobRepair.RowId).ExpArrayIndex ?? 0];
             if (Math.Max(1, itemToRepair.LevelEquip - 10) <= repairJobLevel)
                 return true;
         }
@@ -51,7 +48,7 @@ public unsafe partial class AutoGather
 
     private bool HasDarkMatter(Item itemToRepair)
     {
-        var darkMatters = Svc.Data.Excel.GetSheet<ItemRepairResource>();
+        var darkMatters = Dalamud.GameData.Excel.GetSheet<ItemRepairResource>();
         foreach (var darkMatter in darkMatters)
         {
             if (darkMatter.Item.RowId < itemToRepair.ItemRepair.Value.Item.RowId)
@@ -66,7 +63,7 @@ public unsafe partial class AutoGather
 
     private bool RepairIfNeeded()
     {
-        if (Svc.Condition[ConditionFlag.Mounted] || Player.Job is not Job.BTN and not Job.MIN)
+        if (Dalamud.Conditions[ConditionFlag.Mounted] || Player.Job is not 16 /* MIN */ and not 17 /* BTN */ and not 18 /* FSH */)
             return false;
 
         var itemToRepair = EquipmentNeedingRepair();
@@ -101,13 +98,22 @@ public unsafe partial class AutoGather
 
         TaskManager.Enqueue(() => RepairAddon != null, 1000, true, "Wait until repair menu is ready.");
         TaskManager.DelayNext(delay);
-        TaskManager.Enqueue(() => { if (RepairAddon is var addon && addon != null) new AddonMaster.Repair(addon).RepairAll(); }, 1000, "Repairing all.");
+        TaskManager.Enqueue(() => { if (RepairAddon is var addon && addon != null) { GatherBuddy.Log.Debug("[Repair] Clicking RepairAll button"); new AddonMaster.Repair(addon).RepairAll(); } }, 1000, "Repairing all.");
         TaskManager.Enqueue(() => SelectYesnoAddon != null, 1000, true, "Wait until YesnoAddon is ready.");
         TaskManager.DelayNext(delay);
-        TaskManager.Enqueue(() => { if (SelectYesnoAddon is var addon && addon != null) new AddonMaster.SelectYesno(addon).Yes(); }, 1000, "Confirm repairs.");
-        TaskManager.Enqueue(() => !Svc.Condition[ConditionFlag.Occupied39], 5000, "Wait for repairs.");
+        TaskManager.Enqueue(() => { if (SelectYesnoAddon is var addon && addon != null) Callback.Fire(&addon->AtkUnitBase, true, 0); }, 1000, "Confirm repairs.");
+        TaskManager.Enqueue(() => !Dalamud.Conditions[ConditionFlag.Occupied39], 5000, "Wait for repairs.");
         TaskManager.DelayNext(delay);
         TaskManager.Enqueue(() => { if (RepairAddon is var addon and not null) Callback.Fire(&addon->AtkUnitBase, true, -1); }, 1000, true, "Close repair menu.");
+        TaskManager.DelayNext(1000);
+        TaskManager.Enqueue(() => {
+            var repairAutoAddon = GetAddon<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("RepairAuto");
+            if (repairAutoAddon == null || !repairAutoAddon->IsVisible)
+                return true;
+            GatherBuddy.Log.Debug("[Repair] RepairAuto window still visible, closing it");
+            repairAutoAddon->Close(true);
+            return true;
+        }, 3000, "Wait for RepairAuto window to close or force close it.");
         TaskManager.DelayNext(delay);
 
         return true;
@@ -117,7 +123,7 @@ public unsafe partial class AutoGather
     
     private bool RepairIfNeededForFishing()
     {
-        if (Svc.Condition[ConditionFlag.Mounted] || Player.Job is not Job.FSH)
+        if (Dalamud.Conditions[ConditionFlag.Mounted] || Player.Job is not 18 /* FSH */)
             return false;
 
         var itemToRepair = EquipmentNeedingRepair();
@@ -127,6 +133,9 @@ public unsafe partial class AutoGather
             _lastRepairTime = DateTime.MinValue;
             return false;
         }
+        
+        if (GatherBuddy.Config.AutoGatherConfig.DeferRepairDuringFishingBuffs && (IsFishing || HasActiveFishingBuff()))
+            return false;
         
         if ((DateTime.Now - _lastRepairTime).TotalSeconds < 5)
             return false;
@@ -181,9 +190,18 @@ public unsafe partial class AutoGather
         TaskManager.Enqueue(() => SelectYesnoAddon != null, 1000, true, "Wait until YesnoAddon is ready.");
         TaskManager.DelayNext(delay);
         TaskManager.Enqueue(() => { if (SelectYesnoAddon is var addon && addon != null) new AddonMaster.SelectYesno(addon).Yes(); }, 1000, "Confirm repairs.");
-        TaskManager.Enqueue(() => !Svc.Condition[ConditionFlag.Occupied39], 5000, "Wait for repairs.");
+        TaskManager.Enqueue(() => !Dalamud.Conditions[ConditionFlag.Occupied39], 5000, "Wait for repairs.");
         TaskManager.DelayNext(delay);
         TaskManager.Enqueue(() => { if (RepairAddon is var addon and not null) Callback.Fire(&addon->AtkUnitBase, true, -1); }, 1000, true, "Close repair menu.");
+        TaskManager.DelayNext(1000);
+        TaskManager.Enqueue(() => {
+            var repairAutoAddon = GetAddon<FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase>("RepairAuto");
+            if (repairAutoAddon == null || !repairAutoAddon->IsVisible)
+                return true;
+            GatherBuddy.Log.Debug("[Repair] RepairAuto window still visible, closing it");
+            repairAutoAddon->Close(true);
+            return true;
+        }, 3000, "Wait for RepairAuto window to close or force close it.");
         TaskManager.DelayNext(delay);
         TaskManager.Enqueue(() =>
         {

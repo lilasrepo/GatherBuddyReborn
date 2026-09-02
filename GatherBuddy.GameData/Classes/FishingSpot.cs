@@ -157,9 +157,14 @@ public class FishingSpot : IComparable<FishingSpot>, ILocation
             // Phaenna
             > 10_107 and < 10_136 => data.DataManager.GetExcelSheet<TerritoryType>().GetRow(1291),
             > 10_136 and < 10_145 => data.DataManager.GetExcelSheet<TerritoryType>().GetRow(1291),
-            > 10_146              => data.DataManager.GetExcelSheet<TerritoryType>().GetRow(1291),
+            > 10_146 and < 10_156 => data.DataManager.GetExcelSheet<TerritoryType>().GetRow(1291),
 
-            _ => spot.TerritoryType.ValueNullable,
+            // Oizys
+            > 10_162 and < 10_193 => data.DataManager.GetExcelSheet<TerritoryType>().GetRow(1310),
+
+            // 
+            > 10_200 and < 10_231 => data.DataManager.GetExcelSheet<TerritoryType>().GetRow(1319),
+            _                     => spot.TerritoryType.ValueNullable,
         };
 
     private static string FishingSpotNameHacks(GameData data, FishingSpotRow spot)
@@ -185,6 +190,12 @@ public class FishingSpot : IComparable<FishingSpot>, ILocation
             case > 10_136 and < 10_145: return $"{name} ({spot.RowId - 10_137 + 993:D5})";
             case > 10_146 and < 10_153: return $"{name} ({spot.RowId - 10_147 + 1001:D5})";
             case > 10_152 and < 10_156: return $"{name} ({spot.RowId - 10_153 + 1037:D5})";
+
+            case > 10_162 and < 10_191: return $"{name} ({spot.RowId - 10_163 + 1320:D5})";
+            case > 10_190 and < 10_193: return $"{name} ({spot.RowId - 10_191 + 1368:D5})";
+
+            case > 10_200 and < 10_229: return $"{name} ({spot.RowId - 10_201 + 1650:D5})";
+            case > 10_228 and < 10_231: return $"{name} ({spot.RowId - 10_229 + 1698:D5})";
         }
 
         return name;

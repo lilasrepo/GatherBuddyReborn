@@ -4,13 +4,14 @@ using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
+using FFXIVClientStructs.FFXIV.Client.Game.Event;
 using GatherBuddy.Config;
 using GatherBuddy.Gui;
 using GatherBuddy.SeFunctions;
-using OtterGui;
-using OtterGui.Extensions;
-using OtterGui.Raii;
-using OtterGui.Text;
+using ElliLib;
+using ElliLib.Extensions;
+using ElliLib.Raii;
+using ElliLib.Text;
 using FishingSpot = GatherBuddy.Classes.FishingSpot;
 using TimeStamp = GatherBuddy.Time.TimeStamp;
 
@@ -52,11 +53,12 @@ public partial class FishTimerWindow : Window, IDisposable
     public FishTimerWindow(FishRecorder recorder)
         : base("##FishingTimer")
     {
-        _recorder          =  recorder;
-        IsOpen             =  GatherBuddy.Config.ShowFishTimer;
-        Namespace          =  "FishingTimer";
-        RespectCloseHotkey =  false;
-        _recorder.UsedLure += OnLure;
+        _recorder           =  recorder;
+        IsOpen              =  GatherBuddy.Config.ShowFishTimer;
+        Namespace           =  "FishingTimer";
+        RespectCloseHotkey  =  false;
+        DisableWindowSounds = true;
+        _recorder.UsedLure  += OnLure;
     }
 
     public void Dispose()
@@ -201,7 +203,7 @@ public partial class FishTimerWindow : Window, IDisposable
             _lureTime = int.MinValue;
         }
         else if (newMilliseconds < _milliseconds
-              || GatherBuddy.EventFramework.FishingState is FishingState.None or FishingState.PoleReady
+              || GatherBuddy.EventFramework.FishingState is FishingState.NotFishing or FishingState.PoleReady
               && GatherBuddy.Time.ServerTime >= _nextUptimeChange)
         {
             UpdateFish();
@@ -227,7 +229,14 @@ public partial class FishTimerWindow : Window, IDisposable
             _availableFish = enumerator.OrderBy(f => f.SortOrder).ToArray();
 
             var currentTime = GatherBuddy.Time.ServerTime;
-            _nextUptimeChange = _availableFish.Min(f => f.NextUptime.Start < currentTime ? f.NextUptime.End : f.NextUptime.Start);
+            if (_availableFish.Length > 0)
+            {
+                _nextUptimeChange = _availableFish.Min(f => f.NextUptime.Start < currentTime ? f.NextUptime.End : f.NextUptime.Start);
+            }
+            else
+            {
+                _nextUptimeChange = TimeStamp.MaxValue;
+            }
         }
     }
 
@@ -270,7 +279,7 @@ public partial class FishTimerWindow : Window, IDisposable
         if (GatherBuddy.Config.FishTimerEdit)
             return true;
 
-        if (GatherBuddy.EventFramework.FishingState == FishingState.None)
+        if (GatherBuddy.EventFramework.FishingState == FishingState.NotFishing)
         {
             SetSpot(null);
             return false;

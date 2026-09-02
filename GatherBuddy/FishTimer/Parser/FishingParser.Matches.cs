@@ -1,9 +1,7 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using Dalamud.Game;
 using Dalamud.Game.Text;
-using Dalamud.Game.Text.SeStringHandling;
 using FFXIVClientStructs.FFXIV.Client.Game.WKS;
-using GatherBuddy.Plugin;
 
 namespace GatherBuddy.FishTimer.Parser;
 
@@ -44,11 +42,12 @@ public partial class FishingParser
 
     private const XivChatType FishingMessage = (XivChatType)2243;
 
-    private unsafe void OnMessageDelegate(XivChatType type, int timeStamp, ref SeString sender, ref SeString message, ref bool isHandled)
+    private unsafe void OnMessageDelegate(XivChatType type, int timestamp, ref global::Dalamud.Game.Text.SeStringHandling.SeString sender, ref global::Dalamud.Game.Text.SeStringHandling.SeString message, ref bool isHandled)
     {
         switch (type)
         {
-            case FishingMessage:
+            case (XivChatType)2243:
+            case XivChatType.GatheringSystemMessage:
             {
                 var text = message.TextValue;
 

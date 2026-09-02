@@ -11,9 +11,9 @@ using GatherBuddy.GatherHelper;
 using GatherBuddy.Interfaces;
 using GatherBuddy.Plugin;
 using GatherBuddy.Time;
-using OtterGui;
-using OtterGui.Widgets;
-using ImRaii = OtterGui.Raii.ImRaii;
+using ElliLib;
+using ElliLib.Widgets;
+using ImRaii = ElliLib.Raii.ImRaii;
 
 namespace GatherBuddy.Gui;
 
@@ -213,7 +213,7 @@ public partial class Interface
         ImGui.TableNextColumn();
         var idx = alarm.SoundId.ToIdx();
         ImGui.SetNextItemWidth(85 * ImGuiHelpers.GlobalScale);
-        if (ImGui.Combo("##Sound", ref idx, AlarmCache.SoundIdNames, AlarmCache.SoundIdNames.Length))
+        if (ImGui.Combo("##Sound", ref idx, AlarmCache.SoundIdNames))
         {
             _plugin.AlarmManager.ChangeAlarmSound(group, alarmIdx, AlarmCache.SoundIds[idx]);
             AlarmManager.PreviewAlarm(AlarmCache.SoundIds[idx]);
@@ -302,7 +302,7 @@ public partial class Interface
         ImGui.Checkbox("##print", ref _alarmCache.NewPrintMessage);
         ImGui.TableNextColumn();
         ImGui.SetNextItemWidth(85 * ImGuiHelpers.GlobalScale);
-        ImGui.Combo("##Sound", ref _alarmCache.NewSoundIdx, AlarmCache.SoundIdNames, AlarmCache.SoundIdNames.Length);
+        ImGui.Combo("##Sound", ref _alarmCache.NewSoundIdx, AlarmCache.SoundIdNames);
     }
 
     private void DrawAlarmInfo(AlarmGroup group, int idx)

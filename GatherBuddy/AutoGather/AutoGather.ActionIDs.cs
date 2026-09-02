@@ -1,7 +1,5 @@
-using ECommons.ExcelServices;
-using ECommons.GameHelpers;
+using GatherBuddy.Helpers;
 using System;
-using ECommons.DalamudServices;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using Action = Lumina.Excel.Sheets.Action;
 
@@ -13,11 +11,11 @@ public partial class AutoGather
     {
         public class FishingAction(uint actionId, int minLevel = 1, int gpCost = 0, uint[]? statusProvide = null)
         {
-            public readonly uint    ActionId      = actionId;
-            public readonly int     MinLevel      = minLevel;
-            public readonly int     GpCost        = gpCost;
-            public readonly uint[]? StatusProvide = statusProvide;
-            public string  Name          => Svc.Data.Excel.GetSheet<Action>().GetRow(actionId).Name.ExtractText();
+            public uint    ActionId      => actionId;
+            public int     MinLevel      => minLevel;
+            public int     GpCost        => gpCost;
+            public uint[]? StatusProvide => statusProvide;
+            public string  Name          => field ??= Dalamud.GameData.Excel.GetSheet<Action>().GetRow(actionId).Name.ExtractText();
         }
 
         public enum EffectType
@@ -96,9 +94,9 @@ public partial class AutoGather
             {
                 return Player.Job switch
                 {
-                    Job.BTN => pair.Botanist,
-                    Job.MIN => pair.Miner,
-                    _       => throw new InvalidOperationException("Invalid job selected"),
+                    17 => pair.Botanist, // BTN
+                    16 => pair.Miner,    // MIN
+                    _  => throw new InvalidOperationException("Invalid job selected"),
                 };
             }
         }

@@ -7,7 +7,7 @@ using GatherBuddy.Enums;
 using GatherBuddy.Structs;
 using GatherBuddy.Time;
 using Newtonsoft.Json;
-using OtterGui.Extensions;
+using ElliLib.Extensions;
 
 namespace GatherBuddy.Data;
 
@@ -21,7 +21,6 @@ public static partial class Fish
             return fish;
         }
 
-        // C-fix: API12 Lumina (game 7.1) lacks 7.2+ fish IDs (Cosmic Exploration, etc) — drop to Verbose so it doesn't spam log
         data.Log.Verbose($"Could not find fish {id}.");
         return null;
     }
@@ -41,7 +40,6 @@ public static partial class Fish
         }
         catch (Exception e)
         {
-            // C-fix: catches "Could not find weather/bait/fish" — 7.2+ era IDs not in TC 7.1 Lumina; demote to Verbose
             data.Log.Verbose(e.Message);
         }
 
@@ -63,7 +61,6 @@ public static partial class Fish
         }
         catch (Exception e)
         {
-            // C-fix: catches "Could not find weather/bait/fish" — 7.2+ era IDs not in TC 7.1 Lumina; demote to Verbose
             data.Log.Verbose(e.Message);
         }
 
@@ -98,7 +95,6 @@ public static partial class Fish
         }
         catch (Exception e)
         {
-            // C-fix: 7.2+ era bait IDs not in TC 7.1 Lumina — Verbose, not Error (only realistic throw is the bait-not-found case)
             data.Log.Verbose(e.Message);
         }
 
@@ -137,7 +133,6 @@ public static partial class Fish
         }
         catch (Exception e)
         {
-            // C-fix: catches "Could not find weather/bait/fish" — 7.2+ era IDs not in TC 7.1 Lumina; demote to Verbose
             data.Log.Verbose(e.Message);
         }
 
@@ -165,7 +160,6 @@ public static partial class Fish
         }
         catch (Exception e)
         {
-            // C-fix: catches "Could not find weather/bait/fish" — 7.2+ era IDs not in TC 7.1 Lumina; demote to Verbose
             data.Log.Verbose(e.Message);
         }
 
@@ -191,7 +185,6 @@ public static partial class Fish
         }
         catch (Exception e)
         {
-            // C-fix: catches "Could not find weather/bait/fish" — 7.2+ era IDs not in TC 7.1 Lumina; demote to Verbose
             data.Log.Verbose(e.Message);
         }
 
@@ -330,16 +323,9 @@ public static partial class Fish
         if (fish == null)
             return null;
 
-        // porting-note(api13): upstream throws here, asserting that its hardcoded Data7.x tables
-        // always match the live sheets. That assertion does not hold on TC, whose data version can
-        // carry a patch's items while still lacking rows the same patch added elsewhere -- and the
-        // throw happens inside GameData's constructor, so one absent row fails the whole plugin.
-        // Fish.CosmicMission is declared nullable and IsCosmicFish is `is not null`, so leaving it
-        // unset is a supported state: the fish is simply not treated as a cosmic fish.
-        if (data.CosmicFishingMissions.TryGetValue(value, out var mission))
-            fish.CosmicMission = mission;
-        else
-            data.Log.Verbose($"Could not find cosmic fishing mission {value}; leaving fish {fish.ItemId} non-cosmic.");
+        fish.CosmicMission = data.CosmicFishingMissions.TryGetValue(value, out var mission)
+            ? mission
+            : throw new Exception($"Could not find cosmic fishing mission {value}.");
         return fish;
     }
 
@@ -351,6 +337,15 @@ public static partial class Fish
         fish.OceanTime = times.Aggregate(OceanTime.Never, (a, b) => a | b);
         if (fish.OceanTime != OceanTime.Always)
             fish.FishRestrictions |= FishRestrictions.Time;
+        return fish;
+    }
+
+    private static Classes.Fish? OceanType(this Classes.Fish? fish, OceanSpecies value)
+    {
+        if (fish == null)
+            return null;
+        
+        fish.OceanSpecies = value;
         return fish;
     }
 
@@ -413,9 +408,11 @@ public static partial class Fish
         data.ApplyCrossroads();
         data.ApplySeekersOfEternity();
         data.ApplyThePromiseOfTomorrow();
+        data.ApplyIntoTheMist();
+        data.ApplyTrailToTheHeavens();
         data.ApplyMooches();
         data.ApplyOverrides();
-        //DumpUnknown(Patch.SeekersOfEternity, data.Fishes.Values);
+        //DumpUnknown(Enum.GetValues<Patch>()[^1], data.Fishes.Values);
     }
 
     public static bool ApplyOverrides(this GameData data)

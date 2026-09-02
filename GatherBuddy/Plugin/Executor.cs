@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
@@ -10,12 +10,10 @@ using FFXIVClientStructs.FFXIV.Client.Game;
 using FFXIVClientStructs.FFXIV.Client.UI.Agent;
 using GatherBuddy.Classes;
 using GatherBuddy.Enums;
-using UmbralNodes = GatherBuddy.Data.UmbralNodes;
 using GatherBuddy.Interfaces;
 using GatherBuddy.SeFunctions;
 using GatherBuddy.Time;
 using GatherBuddy.Utility;
-using CommandManager = GatherBuddy.SeFunctions.CommandManager;
 using GatheringType = GatherBuddy.Enums.GatheringType;
 using Aetheryte = GatherBuddy.Classes.Aetheryte;
 using MapType = FFXIVClientStructs.FFXIV.Client.UI.Agent.MapType;
@@ -33,10 +31,9 @@ public class Executor
         Fish,
     }
 
-    private readonly CommandManager _commandManager = new(Dalamud.GameGui, Dalamud.SigScanner);
-    private readonly MacroManager _macroManager = new();
-    private readonly GatherBuddy _plugin;
-    public readonly Identificator Identificator = new();
+    private readonly MacroManager   _macroManager   = new();
+    private readonly GatherBuddy    _plugin;
+    public readonly  Identificator  Identificator = new();
 
     public Executor(GatherBuddy plugin)
         => _plugin = plugin;
@@ -150,17 +147,6 @@ public class Executor
 
         if (!item.Locations.Any())
         {
-            // Special handling for umbral items - they don't have regular locations
-            if (UmbralNodes.IsUmbralItem(item.ItemId))
-            {
-                var umbralInfo = UmbralNodes.GetUmbralItemInfo(item.ItemId);
-                if (umbralInfo.HasValue)
-                {
-                    Communicator.Print($"Umbral item {item.Name[GatherBuddy.Language]} will be gathered during {umbralInfo.Value.Weather} weather in Diadem.");
-                    return null; // Return null but don't show "no location" error
-                }
-            }
-            
             Communicator.LocationNotFound(item, _gatheringType);
             return null;
         }
@@ -193,10 +179,10 @@ public class Executor
 
         if (GatherBuddy.Config.SkipTeleportIfClose
          && Dalamud.ClientState.TerritoryType == _location.Territory.Id
-         && Dalamud.ClientState.LocalPlayer != null)
+         && Dalamud.Objects.LocalPlayer is {} player)
         {
             // Check distance of player to node against distance of aetheryte to node.
-            var playerPos = Dalamud.ClientState.LocalPlayer.Position;
+            var playerPos = player.Position;
             var aetheryte = _location.ClosestAetheryte;
             var posX = Maps.NodeToMap(playerPos.X, _location.Territory.SizeFactor);
             var posY = Maps.NodeToMap(playerPos.Z, _location.Territory.SizeFactor);
@@ -256,7 +242,7 @@ public class Executor
                 return;
             }
 
-            _commandManager.Execute($"/gearset change \"{set}\"");
+            CommandManager.Execute($"/gearset change \"{set}\"");
 
             if (_item is Fish fish)
                 GatherBuddy.CurrentBait.ChangeBait(fish.InitialBait.Id);
@@ -318,7 +304,8 @@ public class Executor
             return;
         }
 
-        var time = DateTime.UtcNow.AddSeconds(30);
+        Dalamud.ClientState.TerritoryChanged += DoWaymarkOnArrival;
+        return;
 
         void DoWaymarkOnArrival(ushort t)
         {
@@ -326,13 +313,11 @@ public class Executor
                 GatherBuddy.WaymarkManager.SetWaymarks(markers);
             Dalamud.ClientState.TerritoryChanged -= DoWaymarkOnArrival;
         }
-
-        Dalamud.ClientState.TerritoryChanged += DoWaymarkOnArrival;
     }
 
     public bool DoCommand(string argument)
     {
-        if (Dalamud.ClientState.LocalPlayer == null || Dalamud.Conditions[ConditionFlag.BetweenAreas])
+        if (Dalamud.Objects.LocalPlayer is null || Dalamud.Conditions[ConditionFlag.BetweenAreas])
             return true;
 
         switch (argument)

@@ -14,7 +14,7 @@ using GatherBuddy.Interfaces;
 using GatherBuddy.Levenshtein;
 using GatherBuddy.Structs;
 using Lumina.Excel.Sheets;
-using OtterGui.Log;
+using ElliLib.Log;
 using Aetheryte = GatherBuddy.Classes.Aetheryte;
 using AetheryteRow = Lumina.Excel.Sheets.Aetheryte;
 using Fish = GatherBuddy.Classes.Fish;
@@ -116,7 +116,8 @@ public class GameData
             Gatherables = DataManager.GetExcelSheet<GatheringItem>()
                 .Where(g => g.Item.RowId != 0 && g.Item.RowId < 1000000 && g.Item.TryGetValue<Item>(out var i) && !i.Name.IsEmpty)
                 .GroupBy(g => g.Item.RowId)
-                .Select(group => group.First())
+                // The Diadem items have multiple matching GatheringItem rows; take the newest
+                .Select(group => group.MaxBy(g => g.RowId))
                 .ToFrozenDictionary(g => g.Item.RowId, g => new Gatherable(this, g));
             GatherablesByGatherId = Gatherables.Values.ToFrozenDictionary(g => g.GatheringId, g => g);
             Log.Verbose("Collected {NumGatherables} different gatherable items.", Gatherables.Count);
@@ -128,8 +129,16 @@ public class GameData
                 .GroupBy(row => row.GatheringPoint.RowId)
                 .ToFrozenDictionary(group => group.Key, group => group.Select(g => g.RowId).Distinct().ToList());
 
+            uint[] OddlyDelicateItemIds = [Gatherables[31767].GatheringId, Gatherables[31769].GatheringId];
+
             var tmpGatheringPoints = DataManager.GetExcelSheet<GatheringPoint>()
-                .Where(row => row.PlaceName.RowId > 0)
+                // The Diadem Umbral nodes have PlaceName.RowId == 0, so we have to disable this filter
+                // and filter by TerritoryType.RowId instead.
+                //.Where(row => row.PlaceName.RowId > 0)
+                // Filter out invalid or deleted territories (0 or 1) and old instances of The Diadem (901 or 929),
+                // exept for the Oddly Delicate items which are mapped to the old insance of The Diadem (901).
+                .Where(row => row.TerritoryType.RowId is not (0 or 1 or 901 or 929) 
+                    || row.TerritoryType.RowId == 901 && row.GatheringPointBase.Value.Item.Any(i => OddlyDelicateItemIds.Contains(i.RowId)))
                 .GroupBy(row => row.GatheringPointBase.RowId)
                 .ToFrozenDictionary(group => group.Key, group => group.Select(g => g.RowId).Distinct().ToList());
 
@@ -142,12 +151,6 @@ public class GameData
             if (GatheringNodes.Count is 0)
                 throw new Exception("Could not fetch any gathering nodes, this is certainly an error, terminating.");
 
-            // porting-note(api13): the api12 stub forced this empty because that Lumina only had
-            // WKSMissionUnit.Unknown0..20, with no Name/ClassJobCategory to filter on. api13's
-            // Lumina.Excel (7.3.1) names both, so this is upstream's own query again. It matters
-            // now rather than later: TC game v7.20 (data 2026.07.22) shipped the international-7.2
-            // Cosmic Exploration fish, so Fish.Apply() stopped returning null for them and the
-            // hardcoded Data7.2 table finally reached Fish.Mission() -- against an empty dictionary.
             CosmicFishingMissions = DataManager.GetExcelSheet<WKSMissionUnit>()
                 .Where(m => m.Name.ByteLength > 0 && (m.ClassJobCategory[0].RowId is 19 || m.ClassJobCategory[1].RowId is 19))
                 .ToFrozenDictionary(m => (ushort)m.RowId, m => new CosmicMission(m));
@@ -155,6 +158,8 @@ public class GameData
 
             Bait = DataManager.GetExcelSheet<Item>()
                 .Where(i => i.ItemSearchCategory.RowId == Structs.Bait.FishingTackleRow)
+                .Concat(DataManager.GetExcelSheet<WKSItemInfo>().Where(i => i.WKSItemSubCategory.RowId is 5)
+                    .Select(i => i.Item.Value))
                 .ToFrozenDictionary(b => b.RowId, b => new Bait(b));
             Log.Verbose("Collected {NumBaits} different types of bait.", Bait.Count);
             if (Bait.Count is 0)
@@ -178,7 +183,7 @@ public class GameData
             OverriddenFish = Fishes.Values.Count(f => f.HasOverridenData);
 
             FishingSpots = DataManager.GetExcelSheet<FishingSpotRow>()
-                .Where(f => (f.PlaceName.RowId != 0 || f.RowId >= 10017) && (f.TerritoryType.RowId > 0 || f.RowId == 10000 || (f.RowId >= 10017 && f.RowId < 10026)))
+                .Where(f => (f.PlaceName.RowId != 0 || f.RowId >= 10017) && (f.TerritoryType.RowId > 0 || f.RowId == 10000 || f.RowId >= 10017))
                 .Select(f => new FishingSpot(this, f))
                 .Concat(
                     DataManager.GetExcelSheet<SpearfishingNotebook>()
@@ -194,7 +199,6 @@ public class GameData
 
             HiddenMaps.Apply(this);
             ForcedAetherytes.Apply(this);
-            UmbralNodes.Apply(this);
 
             OceanRoutes   = SetupOceanRoutes(gameData, FishingSpots);
             OceanTimeline = new OceanTimeline(gameData, OceanRoutes);
@@ -212,6 +216,7 @@ public class GameData
             foreach (var fish in Fishes.Values)
             {
                 if (fish.FishingSpots.Count > 0 && !fish.OceanFish && fish.FishRestrictions != FishRestrictions.None
+                    && (fish.CurrentWeather.Length == 0 || !fish.CurrentWeather[0].IsUmbral)
                  || fish is { OceanFish: true, FishRestrictions: FishRestrictions.Time })
                     fish.InternalLocationId = ++TimedGatherables;
                 else if (fish.FishingSpots.Count > 0)
@@ -229,6 +234,10 @@ public class GameData
     {
         if (t == null || t.Value.RowId < 2)
             return null;
+
+        // Upgrade The Diadem territory to the latest instance
+        if (t.Value.RowId is 901 or 929)
+            t = DataManager.GetExcelSheet<TerritoryType>().GetRow(939);
 
         if (Territories.TryGetValue(t.Value.RowId, out var territory))
             return territory;
@@ -257,7 +266,7 @@ public class GameData
         {
             var spot = fish.FishData?.FishingSpot.RowId ?? 0u;
             if (set.TryGetValue(spot, out var area))
-                fish.OceanArea = fish.OceanArea == OceanArea.None || fish.OceanArea == area ? area : OceanArea.Unknown;
+                fish.OceanArea = fish.OceanArea is OceanArea.None || fish.OceanArea == area ? area : OceanArea.Unknown;
         }
     }
 
@@ -295,7 +304,12 @@ public class GameData
                 SpotDay    = day,
                 SpotSunset = sunset,
                 SpotNight  = night,
-                Area       = i < 13 ? OceanArea.Aldenard : i < 19 ? OceanArea.Othard : OceanArea.Unknown,
+                Area       = i switch
+                {
+                    < 13 => OceanArea.Aldenard,
+                    < 22 => OceanArea.Othard,
+                    _ => OceanArea.Unknown,
+                },
             };
         }
 

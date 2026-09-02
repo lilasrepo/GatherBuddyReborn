@@ -1079,9 +1079,10 @@ public static partial class Fish
             .Points(150)
             .MultiHook(2)
             .Bite(data, HookSet.Precise, BiteType.Weak);
-        data.Apply(45906, Patch.SeekersOfEternity) // Harpagofututor //TODO: Intuition Fish, 3 Leanchoilia + 1 Lunar Glassfish
+        data.Apply(45906, Patch.SeekersOfEternity) // Harpagofututor
             .Bait(data)
             .Mission(data, 495)
+            .Predators(data, 240, (45905, 3), (45903, 1))
             .Points(5000)
             .Bite(data, HookSet.Powerful, BiteType.Legendary);
 
@@ -1181,7 +1182,7 @@ public static partial class Fish
         data.Apply(45934, Patch.SeekersOfEternity) // Hollow Eel
             .Bait(data, 45959)
             .Mission(data, 511)
-            .Bite(data, HookSet.Powerful, BiteType.Strong);
+            .Bite(data, HookSet.Powerful, BiteType.Legendary);
 
         // Westward Hop-print  Edible Fish
         data.Apply(45935, Patch.SeekersOfEternity) // Bluemoon Loach

@@ -8,8 +8,8 @@ using GatherBuddy.Classes;
 using GatherBuddy.Config;
 using GatherBuddy.Enums;
 using GatherBuddy.SeFunctions;
-using OtterGui;
-using ImRaii = OtterGui.Raii.ImRaii;
+using ElliLib;
+using ImRaii = ElliLib.Raii.ImRaii;
 
 namespace GatherBuddy.Spearfishing;
 
@@ -22,13 +22,13 @@ public partial class SpearfishingHelper : Window
       | ImGuiWindowFlags.NoNavFocus
       | ImGuiWindowFlags.NoBackground;
 
-    private        float            _uiScale       = 1;
-    private        Vector2          _uiPos         = Vector2.Zero;
-    private        Vector2          _uiSize        = Vector2.Zero;
-    private unsafe SpearfishWindow* _addon         = null;
-    private        Vector2          _listSizeText  = Vector2.Zero;
-    private        Vector2          _listSizeIcons = Vector2.Zero;
-    private const  float            _iconSize      = 30;
+    private        float              _uiScale       = 1;
+    private        Vector2            _uiPos         = Vector2.Zero;
+    private        Vector2            _uiSize        = Vector2.Zero;
+    private unsafe SpearfishWindow*   _addon         = null;
+    private        Vector2            _listSizeText  = Vector2.Zero;
+    private        Vector2            _listSizeIcons = Vector2.Zero;
+    private const  float              _iconSize      = 30;
 
     private Vector2 ListSize
         => ImGuiHelpers.GlobalScale * (GatherBuddy.Config.ShowSpearfishListIconsAsText ? _listSizeText : _listSizeIcons);
@@ -150,6 +150,8 @@ public partial class SpearfishingHelper : Window
     {
         var oldOpen = _isOpen;
         
+        // porting-note(api13): CS 6966 has no AddonSpearFishing; SeFunctions/SpearfishWindow.cs is the
+        // TC game-7.20-verified struct mirror (node indices 3/15/16/17, fish info at 0x29C/0x2B8/0x2D4).
         _addon  = (SpearfishWindow*)Dalamud.GameGui.GetAddonByName("SpearFishing", 1).Address;
         _isOpen = _addon != null && _addon->Base.WindowNode != null;
         if (!_isOpen)

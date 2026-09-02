@@ -32,7 +32,7 @@ public static partial class Fish
             .Time(0, 240)
             .Transition(data, 2)
             .Weather(data, 3)
-            .Bite(data, HookSet.Unknown, BiteType.Legendary);
+            .Bite(data, HookSet.Powerful, BiteType.Legendary);
         data.Apply(46193, Patch.ThePromiseOfTomorrow) // Azure Diver
             .Bait(data, 43857)
             .Time(1080, 1440)
@@ -364,24 +364,24 @@ public static partial class Fish
 
         // Western Soda-lime Tributary  Arthrolure Field Test
         data.Apply(47490, Patch.ThePromiseOfTomorrow) // White Starburst
-            .Bait(data, 47589)
+            .Bait(data, 47689)
             .Mission(data, 980)
             .Bite(data, HookSet.Precise, BiteType.Weak);
         data.Apply(47491, Patch.ThePromiseOfTomorrow) // Skippingway
-            .Bait(data, 47589)
+            .Bait(data, 47689)
             .Mission(data, 980)
             .Bite(data, HookSet.Powerful, BiteType.Strong);
         data.Apply(47492, Patch.ThePromiseOfTomorrow) // Glass Coral
-            .Bait(data, 47589)
+            .Bait(data, 47689)
             .Mission(data, 980)
             .Bite(data, HookSet.Precise, BiteType.Weak);
         data.Apply(47493, Patch.ThePromiseOfTomorrow) // Sun-purpled Tapestry
-            .Bait(data, 47589)
+            .Bait(data, 47689)
             .Mission(data, 980)
             .Points(400)
             .Bite(data, HookSet.Powerful, BiteType.Strong);
         data.Apply(47494, Patch.ThePromiseOfTomorrow) // Lime Impesctor
-            .Bait(data, 47589)
+            .Bait(data, 47689)
             .Mission(data, 980)
             .Points(1000)
             .Bite(data, HookSet.Powerful, BiteType.Legendary);
@@ -505,7 +505,7 @@ public static partial class Fish
             .Mission(data, 986)
             .MultiHook(2)
             .Bite(data, HookSet.Precise, BiteType.Weak);
-        data.Apply(47520, Patch.ThePromiseOfTomorrow) // Eelsplorer
+        data.Apply(47520, Patch.ThePromiseOfTomorrow) // Stellar Skink
             .Bait(data, 47693)
             .Mission(data, 986)
             .MultiHook(2)
@@ -634,23 +634,23 @@ public static partial class Fish
 
         // Western Soda-lime Tributary EX: Red Cosmomaggot Field Test //TODO: Confirm Points
         data.Apply(47556, Patch.ThePromiseOfTomorrow) // White Starburst
-            .Bait(data, 47593)
+            .Bait(data, 47693)
             .Mission(data, 991)
             .Bite(data, HookSet.Precise, BiteType.Weak);
         data.Apply(47557, Patch.ThePromiseOfTomorrow) // Skippingway
-            .Bait(data, 47593)
+            .Bait(data, 47693)
             .Mission(data, 991)
             .Bite(data, HookSet.Powerful, BiteType.Strong);
         data.Apply(47558, Patch.ThePromiseOfTomorrow) // Glass Coral
-            .Bait(data, 47593)
+            .Bait(data, 47693)
             .Mission(data, 991)
             .Bite(data, HookSet.Precise, BiteType.Weak);
         data.Apply(47559, Patch.ThePromiseOfTomorrow) // Blown Bubble
-            .Bait(data, 47593)
+            .Bait(data, 47693)
             .Mission(data, 991)
             .Bite(data, HookSet.Powerful, BiteType.Strong);
         data.Apply(47560, Patch.ThePromiseOfTomorrow) // Cobalt Horn
-            .Bait(data, 47593)
+            .Bait(data, 47693)
             .Mission(data, 991)
             .Lure(Enums.Lure.Ambitious)
             .Bite(data, HookSet.Powerful, BiteType.Legendary);
@@ -1006,8 +1006,7 @@ public static partial class Fish
             .Bait(data)
             .Mission(data, 1004)
             .Points(10000)
-            .Lure(Enums.Lure.Ambitious)
-            .Bite(data, HookSet.Unknown, BiteType.Unknown);
+            .Bite(data, HookSet.Powerful, BiteType.Legendary);
 
         // Capsule Pools EX+: Elemental-esque Chasm Specimens //TODO:Unfinished Data
         data.Apply(47656, Patch.ThePromiseOfTomorrow) // Glass Guppish
@@ -1033,7 +1032,7 @@ public static partial class Fish
         data.Apply(47661, Patch.ThePromiseOfTomorrow) // Encapsulated Impesctor
             .Bait(data)
             .Mission(data, 1005)
-            .Predators(data, 420, (47659,2))
+            .Predators(data, 420, (47659, 3))
             .Bite(data, HookSet.Powerful, BiteType.Strong);
 
         // Fusingway Flow EX+: Elemental-esque Vent Specimens //TODO: Unifinished Data, This is missing a fish?!

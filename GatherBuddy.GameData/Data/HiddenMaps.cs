@@ -32,7 +32,6 @@ public static class HiddenMaps
         {
             if (!data.Gatherables.TryGetValue(map, out var mapItem))
             {
-                // C-fix: 7.2+ era hidden map items not in TC 7.1 Lumina — Verbose, not Error
                 data.Log.Verbose($"Could not find map item {map}.");
                 continue;
             }

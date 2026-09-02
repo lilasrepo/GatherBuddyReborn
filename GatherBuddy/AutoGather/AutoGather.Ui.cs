@@ -1,5 +1,5 @@
 using Dalamud.Game.ClientState.Objects.Enums;
-using ECommons.GameHelpers;
+using GatherBuddy.Helpers;
 using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using GatherBuddy.Plugin;
 using Dalamud.Bindings.ImGui;
@@ -12,20 +12,17 @@ using System.Text;
 using System.Threading.Tasks;
 using Dalamud.Interface.Colors;
 using Dalamud.Interface.Windowing;
-using ECommons.DalamudServices;
-using ECommons.ImGuiMethods;
+
 using FFXIVClientStructs.FFXIV.Client.UI;
 using GatherBuddy.CustomInfo;
 using Newtonsoft.Json;
-using OtterGui;
-using OtterGui.Raii;
+using ElliLib;
+using ElliLib.Raii;
 
 namespace GatherBuddy.AutoGather
 {
     public static class AutoGatherUI
     {
-        private static bool _gatherDebug;
-
         public static void DrawAutoGatherStatus()
         {
             var enabled = GatherBuddy.AutoGather.Enabled;
@@ -35,12 +32,6 @@ namespace GatherBuddy.AutoGather
             }
 
             ImGui.Text($"Status: {GatherBuddy.AutoGather.AutoStatus}");
-            var lastNavString = GatherBuddy.AutoGather.LastNavigationResult.HasValue
-                ? GatherBuddy.AutoGather.LastNavigationResult.Value
-                    ? "Successful"
-                    : "Failed (If you're seeing this you probably need to restart your game)"
-                : "None";
-            ImGui.Text($"Navigation: {lastNavString}");
         }
 
 
@@ -68,19 +59,20 @@ namespace GatherBuddy.AutoGather
                 GatherBuddy.Log.Information("Node offsets exported to clipboard");
             }
             // First column: Nearby nodes table
-            if (ImGui.BeginTable("##nearbyNodesTable", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+            if (ImGui.BeginTable("##nearbyNodesTable", 7, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.Resizable))
             {
                 ImGui.TableSetupColumn("Name");
                 ImGui.TableSetupColumn("Targetable");
                 ImGui.TableSetupColumn("NodeId");
                 ImGui.TableSetupColumn("Position");
                 ImGui.TableSetupColumn("Distance");
+                ImGui.TableSetupColumn("Auto Offsets");
                 ImGui.TableSetupColumn("Action");
 
                 ImGui.TableHeadersRow();
 
                 var playerPosition = Player.Object?.Position ?? Vector3.Zero;
-                foreach (var node in Svc.Objects.Where(o => o.ObjectKind == ObjectKind.GatheringPoint)
+                foreach (var node in Dalamud.Objects.Where(o => o.ObjectKind == ObjectKind.GatheringPoint)
                              .OrderBy(o => Vector3.Distance(o.Position, playerPosition)))
                 {
                     ImGui.TableNextRow();
@@ -89,13 +81,16 @@ namespace GatherBuddy.AutoGather
                     ImGui.TableSetColumnIndex(1);
                     ImGui.Text(node.IsTargetable ? "Y" : "N");
                     ImGui.TableSetColumnIndex(2);
-                    ImGui.Text(node.DataId.ToString());
+                    ImGui.Text(node.BaseId.ToString());
                     ImGui.TableSetColumnIndex(3);
                     ImGui.Text(node.Position.ToString());
                     ImGui.TableSetColumnIndex(4);
                     var distance = Vector3.Distance(playerPosition, node.Position);
                     ImGui.Text(distance.ToString());
                     ImGui.TableSetColumnIndex(5);
+                    var autoOffsetCount = AutoOffsets.GetOffsetCount(node.BaseId, node.Position);
+                    ImGui.Text(autoOffsetCount.ToString());
+                    ImGui.TableSetColumnIndex(6);
 
                     var territoryId = Dalamud.ClientState.TerritoryType;
                     var isBlacklisted = GatherBuddy.Config.AutoGatherConfig.BlacklistedNodesByTerritoryId.TryGetValue(territoryId, out var list)
@@ -222,3 +217,4 @@ namespace GatherBuddy.AutoGather
         }
     }
 }
+

@@ -8,8 +8,8 @@ using GatherBuddy.GatherHelper;
 using GatherBuddy.Interfaces;
 using GatherBuddy.Plugin;
 using Dalamud.Bindings.ImGui;
-using OtterGui;
-using ImRaii = OtterGui.Raii.ImRaii;
+using ElliLib;
+using ImRaii = ElliLib.Raii.ImRaii;
 
 namespace GatherBuddy.Gui;
 

@@ -5,14 +5,14 @@ using GatherBuddy.Config;
 using GatherBuddy.Enums;
 using GatherBuddy.Interfaces;
 using GatherBuddy.Time;
-using OtterGui.Extensions;
-using OtterGui.Text;
+using ElliLib.Extensions;
+using ElliLib.Text;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
-using ImRaii = OtterGui.Raii.ImRaii;
+using ImRaii = ElliLib.Raii.ImRaii;
 
 namespace GatherBuddy.Gui;
 
@@ -80,6 +80,9 @@ public partial class Interface
 
         public byte MultiHookLower
             => Data.MultiHookLower;
+        
+        public OceanSpecies OceanSpecies
+            => Data.OceanSpecies;
 
         public byte MutliHookUpper
             => Data.MultiHookUpper;
@@ -472,7 +475,7 @@ public partial class Interface
 
                 ImGui.SameLine();
                 ImGui.SetCursorPosY(pos + offsetBig);
-                ImUtf8.Text(" → ");
+                ImUtf8.Text(" ? ");
                 ImGui.SameLine();
             }
 

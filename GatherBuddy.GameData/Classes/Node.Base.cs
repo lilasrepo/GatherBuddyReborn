@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using GatherBuddy.Data;
 using GatherBuddy.Enums;
 using GatherBuddy.Interfaces;
 using GatherBuddy.Structs;
@@ -9,6 +10,7 @@ using GatherBuddy.Time;
 using GatherBuddy.Utility;
 using Lumina.Excel.Sheets;
 using GatheringType = GatherBuddy.Enums.GatheringType;
+using Weather = GatherBuddy.Structs.Weather;
 
 namespace GatherBuddy.Classes;
 
@@ -40,8 +42,12 @@ public partial class GatheringNode : IComparable<GatheringNode>, ILocation
 
     public bool IsBotanist
         => GatheringType.ToGroup() == GatheringType.Botanist;
+    public uint FolkloreId { get; init; }
+    public bool IsLeveling { get; init; }
 
     public string Folklore { get; init; }
+
+    public Weather UmbralWeather { get; init; } = Weather.Invalid;
 
 
     public GatheringNode(GameData data, IReadOnlyDictionary<uint, List<uint>> gatheringPoint,
@@ -54,7 +60,15 @@ public partial class GatheringNode : IComparable<GatheringNode>, ILocation
         var nodeList = gatheringPoint.TryGetValue(node.RowId, out var nl) ? (IReadOnlyList<uint>)nl : Array.Empty<uint>();
         var nodeRow  = nodeList.Count > 0 ? nodes.GetRowOrDefault(nodeList[0]) : null;
         Territory = data.FindOrAddTerritory(nodeRow?.TerritoryType.Value) ?? Territory.Invalid;
-        Name      = MultiString.ParseSeStringLumina(nodeRow?.PlaceName.ValueNullable?.Name);
+        if (nodeRow?.PlaceName.RowId == 0 && Territory.Id == 939)
+        {
+            // The Diadem Umbral items hack: replace empty PlaceName with "The Diadem"
+            Name = MultiString.ParseSeStringLumina(data.DataManager.GetExcelSheet<PlaceName>().GetRow(1647).Name);
+        }
+        else
+        {
+            Name = MultiString.ParseSeStringLumina(nodeRow?.PlaceName.ValueNullable?.Name);
+        }
         // Obtain the center of the coordinates. We do not care for the radius.
         var coords   = data.DataManager.GetExcelSheet<ExportedGatheringPoint>();
         var coordRow = coords.GetRowOrDefault(node.RowId);
@@ -79,11 +93,18 @@ public partial class GatheringNode : IComparable<GatheringNode>, ILocation
         DefaultRadius    = Radius;
 
         // Obtain additional information.
-        Folklore = MultiString.ParseSeStringLumina(nodeRow?.GatheringSubCategory.ValueNullable?.FolkloreBook);
+        var subCategory = nodeRow?.GatheringSubCategory.ValueNullable;
+        var subCategoryItemId = subCategory is { } category ? category.Item.RowId : 0;
+        FolkloreId = subCategoryItemId;
+        IsLeveling = subCategoryItemId == 0;
+        Folklore = MultiString.ParseSeStringLumina(subCategory?.FolkloreBook);
         var extendedRow = nodeRow == null ? null : data.DataManager.GetExcelSheet<GatheringPointTransient>()?.GetRow(nodeRow.Value.RowId);
-        (Times, NodeType) = GetTimes(extendedRow);
-        if (Folklore.Length > 0 && NodeType == NodeType.Unspoiled && nodeRow!.Value.GatheringSubCategory.Value!.Item.RowId != 0)
+        (Times, NodeType) = nodeRow?.Type == 8 ? (BitfieldUptime.AllHours, NodeType.Clouded) : GetTimes(extendedRow);
+        if (Folklore.Length > 0 && NodeType == NodeType.Unspoiled && subCategoryItemId != 0)
             NodeType = NodeType.Legendary;
+
+        if (NodeType == NodeType.Clouded)
+            UmbralWeather = data.Weathers[(uint)UmbralNodes.UmbralNodeData.First(data => data.BaseNodeId == node.RowId).Weather];
 
         // Obtain the items and add the node to their individual lists.
         Items = node.Item
@@ -95,13 +116,15 @@ public partial class GatheringNode : IComparable<GatheringNode>, ILocation
         {
             if (!gatheringItemPoint.TryGetValue(n, out var gatherableList))
                 break;
-
             foreach (var g in gatherableList)
             {
                 if (data.GatherablesByGatherId.TryGetValue(g, out var gatherable)
-                 && gatherable.GatheringData.IsHidden
                  && !Items.Contains(gatherable))
+                {
+                    if (NodeType == NodeType.Ephemeral && gatherable.IsCrystal)
+                        continue;
                     Items.Add(gatherable);
+                }
             }
         }
 

@@ -2,18 +2,19 @@ using Dalamud.Interface.Components;
 using Dalamud.Interface.Utility.Raii;
 using GatherBuddy.AutoGather;
 using GatherBuddy.Config;
+using GatherBuddy.Plugin;
 using Dalamud.Bindings.ImGui;
 using Lumina.Excel.Sheets;
 using Newtonsoft.Json;
-using OtterGui;
+using ElliLib;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
-using ECommons.ImGuiMethods;
-using GatherBuddy.Classes;
 using static GatherBuddy.AutoGather.AutoGather;
+using Dalamud.Utility;
+using GatherBuddy.Interfaces;
 
 namespace GatherBuddy.Gui
 {
@@ -84,7 +85,7 @@ namespace GatherBuddy.Gui
                 var preset = ConfigPreset.FromBase64String(data);
                 if (preset == null)
                 {
-                    Notify.Error("Failed to load config preset from clipboard. Are you sure it's valid?");
+                    Communicator.PrintError("Failed to load config preset from clipboard. Are you sure it's valid?");
                     return false;
                 }
 
@@ -92,7 +93,7 @@ namespace GatherBuddy.Gui
 
                 Items.Insert(Items.Count - 1, preset);
                 Save();
-                Notify.Success($"Imported config preset {preset.Name} from clipboard successfully.");
+                Communicator.Print($"Imported config preset {preset.Name} from clipboard successfully.");
                 return true;
             }
 
@@ -152,83 +153,18 @@ namespace GatherBuddy.Gui
                     }
 
                     if (items != null && items.Count > 0)
-                {
-                    foreach (var item in items)
                     {
-                        Items.Add(item);
-                    }
-                }
-                else
-                {
-                    //Convert old settings to the new Default preset
-                    if (GatherBuddy.Config.AutoGatherConfig != null)
-                    {
-                        Items.Add(GatherBuddy.Config.AutoGatherConfig.ConvertToPreset());
-                        var firstItem = Items.FirstOrDefault();
-                        if (firstItem != null)
+                        foreach (var item in items)
                         {
-                            firstItem.ChooseBestActionsAutomatically = true;
-                            Save();
-                            GatherBuddy.Config.AutoGatherConfig.ConfigConversionFixed        = true;
-                            GatherBuddy.Config.AutoGatherConfig.RotationSolverConversionDone = true;
-                            GatherBuddy.Config.Save();
+                            MigrateHQItemIds(item);
+                            Items.Add(item);
                         }
+
+                        Items[Items.Count - 1] = Items[Items.Count - 1].MakeDefault();
                     }
                     else
                     {
-                        Items.Add(new ConfigPreset { Name = "Default" });
-                    }
-                }
-
-                var lastItem = Items.LastOrDefault();
-                if (lastItem != null)
-                {
-                    var idx = Items.IndexOf(lastItem);
-                    Items[idx] = lastItem.MakeDefault();
-                }
-
-                if (GatherBuddy.Config.AutoGatherConfig != null && !GatherBuddy.Config.AutoGatherConfig.RotationSolverConversionDone)
-                {
-                    var last = Items.LastOrDefault();
-                    if (last != null)
-                    {
-                        last.ChooseBestActionsAutomatically = true;
-                        GatherBuddy.Config.AutoGatherConfig.RotationSolverConversionDone = true;
-                        Save();
-                        GatherBuddy.Config.Save();
-                    }
-                }
-
-                if (GatherBuddy.Config.AutoGatherConfig != null && !GatherBuddy.Config.AutoGatherConfig.ConfigConversionFixed)
-                {
-                    var def = Items.LastOrDefault();
-                    if (def == null)
-                        return;
-                    fixAction(def.GatherableActions.Bountiful);
-                    fixAction(def.GatherableActions.Yield1);
-                    fixAction(def.GatherableActions.Yield2);
-                    fixAction(def.GatherableActions.SolidAge);
-                    fixAction(def.GatherableActions.TwelvesBounty);
-                    fixAction(def.GatherableActions.GivingLand);
-                    fixAction(def.GatherableActions.Gift1);
-                    fixAction(def.GatherableActions.Gift2);
-                    fixAction(def.GatherableActions.Tidings);
-                    fixAction(def.GatherableActions.Bountiful);
-                    fixAction(def.CollectableActions.Scrutiny);
-                    fixAction(def.CollectableActions.Scour);
-                    fixAction(def.CollectableActions.Brazen);
-                    fixAction(def.CollectableActions.Meticulous);
-                    fixAction(def.CollectableActions.SolidAge);
-                    fixAction(def.Consumables.Cordial);
-                    Save();
-                    GatherBuddy.Config.AutoGatherConfig.ConfigConversionFixed = true;
-                    GatherBuddy.Config.Save();
-                }
-
-                    void fixAction(ConfigPreset.ActionConfig action)
-                    {
-                        if (action.MaxGP == 0)
-                            action.MaxGP = ConfigPreset.MaxGP;
+                        Items.Add(new ConfigPreset().MakeDefault());
                     }
                 }
                 catch (Exception ex)
@@ -237,13 +173,7 @@ namespace GatherBuddy.Gui
                     Items.Clear();
                     try
                     {
-                        Items.Add(new ConfigPreset { Name = "Default" });
-                        var fallbackItem = Items.LastOrDefault();
-                        if (fallbackItem != null)
-                        {
-                            var idx = Items.IndexOf(fallbackItem);
-                            Items[idx] = fallbackItem.MakeDefault();
-                        }
+                        Items.Add(new ConfigPreset().MakeDefault());
                     }
                     catch (Exception fallbackEx)
                     {
@@ -252,39 +182,34 @@ namespace GatherBuddy.Gui
                 }
             }
 
-            public ConfigPreset Match(Gatherable? item)
+            private static void MigrateHQItemIds(ConfigPreset preset)
             {
-                var defaultPreset = Items.LastOrDefault();
-                if (defaultPreset == null)
-                {
-                    defaultPreset = new ConfigPreset { Name = "Default" }.MakeDefault();
-                    Items.Add(defaultPreset);
-                    return defaultPreset;
-                }
-                return item == null
-                    ? defaultPreset
-                    : Items.SkipLast(1).Where(i => i.Match(item)).FirstOrDefault(defaultPreset);
+                MigrateConsumableItemId(preset.Consumables.Cordial);
+                MigrateConsumableItemId(preset.Consumables.Food);
+                MigrateConsumableItemId(preset.Consumables.Potion);
+                MigrateConsumableItemId(preset.Consumables.Manual);
+                MigrateConsumableItemId(preset.Consumables.SquadronManual);
+                MigrateConsumableItemId(preset.Consumables.SquadronPass);
             }
 
-            public ConfigPreset Match(Fish? item)
+            private static void MigrateConsumableItemId(ConfigPreset.ActionConfigConsumable consumable)
             {
-                var defaultPreset = Items.LastOrDefault();
-                if (defaultPreset == null)
+                if (consumable.ItemId >= 100_000 && consumable.ItemId < 1_000_000)
                 {
-                    defaultPreset = new ConfigPreset { Name = "Default" }.MakeDefault();
-                    Items.Add(defaultPreset);
-                    return defaultPreset;
+                    consumable.ItemId = consumable.ItemId - 100_000 + 1_000_000;
                 }
+            }
+
+            public ConfigPreset Match(IGatherable? item)
+            {
+                var defaultPreset = Items.Last();
                 return item == null
                     ? defaultPreset
                     : Items.SkipLast(1).Where(i => i.Match(item)).FirstOrDefault(defaultPreset);
             }
         }
 
-        public ConfigPreset MatchConfigPreset(Gatherable? item)
-            => _configPresetsSelector.Match(item);
-
-        public ConfigPreset MatchConfigPreset(Fish? item)
+        public ConfigPreset MatchConfigPreset(IGatherable? item)
             => _configPresetsSelector.Match(item);
 
         public void DrawConfigPresetsTab()
@@ -310,13 +235,13 @@ namespace GatherBuddy.Gui
                 var current = _configPresetsSelector.Current;
                 if (current == null)
                 {
-                    Notify.Error("No config preset selected.");
+                    Communicator.PrintError("No config preset selected.");
                     return;
                 }
 
                 var text = current.ToBase64String();
                 ImGui.SetClipboardText(text);
-                Notify.Success($"Successfully copied {current.Name} to clipboard.");
+                Communicator.Print($"Successfully copied {current.Name} to clipboard.");
             }
 
             if (ImGui.Button("Check"))
@@ -344,21 +269,9 @@ namespace GatherBuddy.Gui
                             .Select(x => ("", x.name, GatherBuddy.GameData.Gatherables[x.id]));
                         var items = _plugin.AutoGatherListsManager.Lists
                             .Where(x => x.Enabled && !x.Fallback)
-                            .SelectMany(x => x.Items.Select(i => (x.Name, i.Name[GatherBuddy.Language], i as Gatherable)));
-                        var fish = _plugin.AutoGatherListsManager.Lists.Where(x => x.Enabled && !x.Fallback)
-                            .SelectMany(x => x.Items.Select(i => (x.Name, i.Name[GatherBuddy.Language], i as Fish)));
+                            .SelectMany(x => x.Items.Select(i => (x.Name, i.Name[GatherBuddy.Language], i)));
 
                         foreach (var (list, name, item) in items)
-                        {
-                            ImGui.TableNextRow();
-                            ImGui.TableNextColumn();
-                            ImGui.Text(list);
-                            ImGui.TableNextColumn();
-                            ImGui.Text(name);
-                            ImGui.TableNextColumn();
-                            ImGui.Text(MatchConfigPreset(item).Name);
-                        }
-                        foreach (var (list, name, item) in fish)
                         {
                             ImGui.TableNextRow();
                             ImGui.TableNextColumn();
@@ -519,9 +432,13 @@ namespace GatherBuddy.Gui
                 ImGui.SameLine(0, ImGui.CalcTextSize("Collectables").X - ImGui.CalcTextSize("Unspoiled").X + ItemSpacing.X);
                 if (ImGuiUtil.Checkbox("Legendary", "", preset.NodeType.Legendary, x => preset.NodeType.Legendary = x))
                     selector.Save();
-                ImGui.SameLine();
+                ImGui.SameLine(0, ImGui.CalcTextSize("Gatherables").X - ImGui.CalcTextSize("Legendary").X + ItemSpacing.X);
                 if (ImGuiUtil.Checkbox("Ephemeral", "", preset.NodeType.Ephemeral, x => preset.NodeType.Ephemeral = x))
                     selector.Save();
+                ImGui.SameLine();
+                if (ImGuiUtil.Checkbox("Clouded", "", preset.NodeType.Clouded, x => preset.NodeType.Clouded = x))
+                    selector.Save();
+
 
                 ImGui.Text("Item types:");
                 ImGui.SameLine(0, ImGui.CalcTextSize("Node types:").X - ImGui.CalcTextSize("Item types:").X + ItemSpacing.X);
@@ -531,19 +448,26 @@ namespace GatherBuddy.Gui
                 if (ImGuiUtil.Checkbox("Collectables", "", preset.ItemType.Collectables, x => preset.ItemType.Collectables = x))
                     selector.Save();
                 ImGui.SameLine();
-                if (ImGuiUtil.Checkbox("Other", "", preset.ItemType.Other, x => preset.ItemType.Other = x))
+                if (ImGuiUtil.Checkbox("Gatherables", "", preset.ItemType.Other, x => preset.ItemType.Other = x))
                     selector.Save();
                 ImGui.SameLine();
-                if (ImGuiUtil.Checkbox("Fish", "", preset.ItemType.Fish, x => preset.ItemType.Fish = x))
+                if (ImGuiUtil.Checkbox("Fish", "", preset.ItemType.Fish, x =>
+                    {
+                        preset.ItemType.Fish = x;
+                        if (x)
+                            preset.ChooseBestActionsAutomatically = false;
+                    }))
                     selector.Save();
             }
 
             using var child = ImRaii.Child("ConfigPresetSettings", new Vector2(-1.5f * ItemSpacing.X, -ItemSpacing.Y));
 
             using var width = ImRaii.ItemWidth(SetInputWidth);
+            var showGeneralSettings = !preset.ItemType.Fish || preset.ItemType.Crystals || preset.ItemType.Other || preset.ItemType.Collectables;
 
-            using (var node = ImRaii.TreeNode("General Settings", ImGuiTreeNodeFlags.Framed))
+            if (showGeneralSettings)
             {
+                using var node = ImRaii.TreeNode("General Settings", ImGuiTreeNodeFlags.Framed);
                 if (node)
                 {
                     if (preset.ItemType.Crystals || preset.ItemType.Other)
@@ -602,16 +526,20 @@ namespace GatherBuddy.Gui
                         }
                     }
 
-                    if (ImGuiUtil.Checkbox("Automatically decide what actions to use",
-                            "This setting works differently depending on item or node type.\n"
-                          + "For collectables: the usual collectable rotation is used with all actions enabled.\n"
-                          + "For unspoiled and legendary nodes: actions are chosen to maximise the yield.\n"
-                          + "For regular nodes: actions are chosen to maximise the yield per GP spent.\n",
-                            preset.ChooseBestActionsAutomatically,
-                            x => preset.ChooseBestActionsAutomatically = x))
-                        selector.Save();
+                    var isFishExclusive = preset.ItemType.Fish && !preset.ItemType.Crystals && !preset.ItemType.Other && !preset.ItemType.Collectables;
+                    if (!isFishExclusive)
+                    {
+                        if (ImGuiUtil.Checkbox("Automatically decide what actions to use",
+                                "This setting works differently depending on item or node type.\n"
+                              + "For collectables: the usual collectable rotation is used with all actions enabled.\n"
+                              + "For unspoiled and legendary nodes: actions are chosen to maximise the yield.\n"
+                              + "For regular nodes: actions are chosen to maximise the yield per GP spent.\n",
+                                preset.ChooseBestActionsAutomatically,
+                                x => preset.ChooseBestActionsAutomatically = x))
+                            selector.Save();
+                    }
 
-                    if (preset.ChooseBestActionsAutomatically && preset.NodeType.Regular)
+                    if (!preset.ItemType.Fish && preset.ChooseBestActionsAutomatically && preset.NodeType.Regular)
                     {
                         if (ImGuiUtil.Checkbox("Hold off spending GP until a node with the best bonuses",
                                 "This setting is for regular nodes only. When enabled, GP would be kept for nodes with bonuses\n"
@@ -632,6 +560,7 @@ namespace GatherBuddy.Gui
                 using var node = ImRaii.TreeNode("Gathering Actions", ImGuiTreeNodeFlags.Framed);
                 if (node)
                 {
+                    DrawActionConfig(ConcatNames(Actions.Luck),      preset.GatherableActions.Luck,      selector.Save);
                     DrawActionConfig(ConcatNames(Actions.Bountiful), preset.GatherableActions.Bountiful, selector.Save);
                     DrawActionConfig(ConcatNames(Actions.Yield1),    preset.GatherableActions.Yield1,    selector.Save);
                     DrawActionConfig(ConcatNames(Actions.Yield2),    preset.GatherableActions.Yield2,    selector.Save);
@@ -659,6 +588,20 @@ namespace GatherBuddy.Gui
                     DrawActionConfig(ConcatNames(Actions.SolidAge),     preset.CollectableActions.SolidAge,   selector.Save);
                 }
             }
+            if (preset.ItemType.Fish)
+            {
+                using var node = ImRaii.TreeNode("Fishing Actions", ImGuiTreeNodeFlags.Framed);
+                if (node)
+                {
+                    DrawToggleConfig("Patience / Patience II", preset.FishingActions.Patience, selector.Save);
+                    DrawFishingActionConfig(Actions.PrizeCatch.Name,    preset.FishingActions.PrizeCatch,    selector.Save);
+                    DrawFishingActionConfig(Actions.Chum.Name,          preset.FishingActions.Chum,          selector.Save);
+                    DrawFishingActionConfig(Actions.SurfaceSlap.Name,   preset.FishingActions.SurfaceSlap,   selector.Save);
+                    DrawFishingActionConfig(Actions.IdenticalCast.Name, preset.FishingActions.IdenticalCast, selector.Save);
+                    DrawFishingActionConfig(Actions.AmbitiousLure.Name, preset.FishingActions.AmbitiousLure, selector.Save);
+                    DrawFishingActionConfig(Actions.ModestLure.Name,    preset.FishingActions.ModestLure,    selector.Save);
+                }
+            }
 
             {
                 using var node = ImRaii.TreeNode("Consumables", ImGuiTreeNodeFlags.Framed);
@@ -666,7 +609,7 @@ namespace GatherBuddy.Gui
                 {
                     DrawActionConfig("Cordial",         preset.Consumables.Cordial,        selector.Save, PossibleCordials);
                     DrawActionConfig("Food",            preset.Consumables.Food,           selector.Save, PossibleFoods,           true);
-                    DrawActionConfig("Potion",          preset.Consumables.Potion,         selector.Save, PossiblePotions,         true);
+                    DrawActionConfig("Medicine",        preset.Consumables.Potion,         selector.Save, PossiblePotions,         true);
                     DrawActionConfig("Manual",          preset.Consumables.Manual,         selector.Save, PossibleManuals,         true);
                     DrawActionConfig("Squadron Manual", preset.Consumables.SquadronManual, selector.Save, PossibleSquadronManuals, true);
                     DrawActionConfig("Squadron Pass",   preset.Consumables.SquadronPass,   selector.Save, PossibleSquadronPasses,  true);
@@ -816,14 +759,15 @@ namespace GatherBuddy.Gui
                 var list = items
                     .SelectMany(item => new[]
                     {
-                        (item, rowid: item.RowId),
-                        (item, rowid: item.RowId + 100000)
+                        (item, rowid: item.RowId, isHq: false),
+                        (item, rowid: item.RowId + 1_000_000, isHq: true)
                     })
-                    .Where(x => x.item.CanBeHq || x.rowid < 100000)
-                    .Select(x => (name: x.item.Name.ExtractText(), x.rowid, count: GetInventoryItemCount(x.rowid)))
+                    .Where(x => !x.isHq || x.item.CanBeHq)
+                    .Select(x => (name: ItemUtil.GetItemName(x.rowid, includeIcon: true).ExtractText(), x.rowid, count: GetInventoryItemCount(x.rowid)))
+                    .Where(x => !string.IsNullOrEmpty(x.name))
                     .OrderBy(x => x.count == 0)
                     .ThenBy(x => x.name)
-                    .Select(x => x with { name = $"{(x.rowid > 100000 ? " " : "")}{x.name} ({x.count})" })
+                    .Select(x => x with { name = $"{x.name} ({x.count})" })
                     .ToList();
 
                 var       selected = (action7.ItemId > 0 ? list.FirstOrDefault(x => x.rowid == action7.ItemId).name : null) ?? string.Empty;
@@ -856,5 +800,51 @@ namespace GatherBuddy.Gui
                 }
             }
         }
+
+        private static void DrawToggleConfig(string name, ConfigPreset.ToggleConfig action, System.Action save)
+        {
+            using var node = ImRaii.TreeNode(name);
+            if (!node)
+                return;
+
+            if (ImGuiUtil.Checkbox("Enabled", "", action.Enabled, x => action.Enabled = x))
+                save();
+        }
+
+        private void DrawFishingActionConfig(string name, ConfigPreset.FishingActionConfig action, System.Action save)
+        {
+            using var node = ImRaii.TreeNode(name);
+            if (!node)
+                return;
+
+            if (ImGuiUtil.Checkbox("Enabled", "", action.Enabled, x => action.Enabled = x))
+                save();
+            if (!action.Enabled)
+                return;
+
+            var thresholdAbove = action.GpThresholdAbove;
+            if (ImGui.RadioButton("Use when GP is Above", thresholdAbove))
+            {
+                action.GpThresholdAbove = true;
+                save();
+            }
+
+            ImGui.SameLine();
+            if (ImGui.RadioButton("Below", !thresholdAbove))
+            {
+                action.GpThresholdAbove = false;
+                save();
+            }
+
+            var threshold = action.GpThreshold;
+            ImGui.SetNextItemWidth(SetInputWidth / 2);
+            if (ImGui.DragInt("GP Threshold", ref threshold, 1, 0, ConfigPreset.MaxGP))
+                action.GpThreshold = threshold;
+            if (ImGui.IsItemDeactivatedAfterEdit())
+                save();
+        }
     }
 }
+
+
+

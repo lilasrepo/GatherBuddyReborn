@@ -221,54 +221,46 @@ public class GatherGroupManager
 
         try
         {
-            var text             = File.ReadAllText(file.FullName);
-            var data             = JsonConvert.DeserializeObject<List<TimedGroup.Config>>(text)!;
-            // TC patch: split upstream's single `changes` flag into two — real
-            // load failures (skipped invalid items / duplicates / unnamed) vs.
-            // new defaults added on top. Upstream conflates them and shows an
-            // alarming "Failed to load some gather groups" error whenever a new
-            // version of the plugin ships a new default group the saved file
-            // doesn't have yet. Auto-save covers both cases so the notification
-            // only fires once per real failure.
-            var loadFailures     = false;
-            var defaultsAdded    = false;
+            var text    = File.ReadAllText(file.FullName);
+            var data    = JsonConvert.DeserializeObject<List<TimedGroup.Config>>(text)!;
+            var changes = false;
             foreach (var config in data)
             {
                 if (!TimedGroup.FromConfig(config, out var group))
                 {
                     GatherBuddy.Log.Error($"Invalid items in gather group {group.Name} skipped.");
-                    loadFailures = true;
+                    changes = true;
                 }
 
                 var searchName = group.Name.ToLowerInvariant().Trim();
                 if (searchName.Length == 0)
                 {
-                    loadFailures = true;
+                    changes = true;
                     GatherBuddy.Log.Error("Gather group without name found, skipping.");
                     continue;
                 }
 
                 if (!manager.Groups.TryAdd(searchName, group))
                 {
-                    loadFailures = true;
+                    changes = true;
                     GatherBuddy.Log.Error($"Multiple gather groups with the same name {searchName} found, skipping later ones.");
                 }
             }
 
-            defaultsAdded = manager.SetDefaults();
-            if (loadFailures || defaultsAdded)
-                manager.Save();
-            if (loadFailures)
+            if (changes)
             {
                 Dalamud.Notifications.AddNotification(new Notification()
                 {
                     Title = "GatherBuddy Error",
                     Content =
-                        "Failed to load some gather groups. See the plugin log for more details.",
+                        "Failed to load some gather groups. See the plugin log for more details. This is not saved, if it keeps happening you need to manually change an Gather Group to cause a save.",
                     MinimizedText = "Failed to load gather groups.",
                     Type          = NotificationType.Error,
                 });
             }
+
+            if (manager.SetDefaults() && !changes)
+                manager.Save();
         }
         catch (Exception e)
         {

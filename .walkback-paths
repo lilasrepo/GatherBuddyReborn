@@ -1,0 +1,21 @@
+# Pinned 2026-09-02 (GBR forward-port to upstream HEAD 4d16b9d8 / v7.5.0.0; walk-back pin retired).
+#
+# Upstream GatherBuddyReborn consumes ElliLib and ElliCon as git SUBMODULES (see .gitmodules),
+# both declared net10 / Dalamud.NET.Sdk 15. The TC tree vendors hand-retargeted api13 source for
+# each (net9 + Microsoft.NET.Sdk + explicit Dalamud <Reference> block, incl. Serilog/ImGuiScene
+# which the SDK used to supply implicitly). A refresh must NOT overwrite them from upstream:
+# `git archive` does not descend into submodule gitlinks, so an unguarded first-port/refresh
+# would leave ElliLib/ and ElliCon/ EMPTY and the whole tree would stop compiling.
+#
+# Two files in ElliLib also carry hand fixes that are invisible upstream:
+#   Widgets/IndividualHelpers.cs  ObjectKind.Mount -> MountType  (api15 renamed the member)
+#   Text/ImUtf8.SliderAngle.cs    re-encoded cp1252 -> UTF-8     (raw 0xB0 degree sign; Roslyn
+#                                 under Microsoft.NET.Sdk reads source as UTF-8 and errors CS1039)
+ElliLib/*
+ElliCon/*
+
+# The SDK-10 compiler is required for the C# 14 `extension` blocks ElliLib/ElliCon use; the TFM
+# stays net9.0-windows. Same arrangement as TC_forward/AutoHook and TC_forward/ffxiv_bossmod.
+global.json
+
+# NOT version-pinned. GatherBuddyReborn tracks upstream's <Version> (7.5.0.0 at this port).

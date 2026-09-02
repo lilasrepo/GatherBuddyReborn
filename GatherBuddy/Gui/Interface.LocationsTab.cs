@@ -11,10 +11,10 @@ using GatherBuddy.Config;
 using GatherBuddy.Enums;
 using GatherBuddy.Interfaces;
 using GatherBuddy.Structs;
-using OtterGui;
-using OtterGui.Table;
-using OtterGui.Widgets;
-using ImRaii = OtterGui.Raii.ImRaii;
+using ElliLib;
+using ElliLib.Table;
+using ElliLib.Widgets;
+using ImRaii = ElliLib.Raii.ImRaii;
 
 namespace GatherBuddy.Gui;
 

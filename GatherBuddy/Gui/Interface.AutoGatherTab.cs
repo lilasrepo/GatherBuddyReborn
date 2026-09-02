@@ -11,35 +11,25 @@ using GatherBuddy.AutoGather.Lists;
 using GatherBuddy.Classes;
 using GatherBuddy.Data;
 using GatherBuddy.Config;
+using GatherBuddy.Crafting;
 using GatherBuddy.CustomInfo;
 using GatherBuddy.Plugin;
 using Dalamud.Bindings.ImGui;
-using OtterGui;
-using OtterGui.Widgets;
-using ImRaii = OtterGui.Raii.ImRaii;
-using ECommons.ImGuiMethods;
-using ECommons;
+using ElliLib;
+using ElliLib.Widgets;
+using ImRaii = ElliLib.Raii.ImRaii;
 using GatherBuddy.Interfaces;
+using Lumina.Text.ReadOnly;
+using GatherBuddy.AutoGather.Helpers;
 
 namespace GatherBuddy.Gui;
 
 public partial class Interface
 {
-    private class AutoGatherListsDragDropData
+    private record class AutoGatherListsDragDropData(AutoGatherList List, IGatherable Item, int ItemIdx)
     {
-        public AutoGatherList list;
-        public IGatherable    Item;
-        public int            ItemIdx;
-
-        public AutoGatherListsDragDropData(AutoGatherList list, IGatherable item, int idx)
-        {
-            this.list = list;
-            Item      = item;
-            ItemIdx   = idx;
-        }
+        public static string Label => "AutoGatherListItem";
     }
-
-    private static AutoGatherListsDragDropData? _dragDropData;
 
     private class AutoGatherListsCache : IDisposable
     {
@@ -76,13 +66,7 @@ public partial class Interface
         {
             var all = GatherBuddy.GameData.Gatherables.Values
                 .Where(g => g.NodeList.SelectMany(l => l.WorldPositions.Values)
-                    .SelectMany(p => p).Any() 
-                    || UmbralNodes.IsUmbralItem(g.ItemId) // Include umbral items
-                    || (g.NodeList.Any(n => n.Territory.Id is 901 or 929 or 939) // Include Diadem items
-                        && (g.Name[GatherBuddy.Language].Contains("Grade 4") // Grade 4: include all
-                            || (g.Name[GatherBuddy.Language].Contains("Artisanal") // Grade 2/3: only Artisanal
-                                && (g.Name[GatherBuddy.Language].Contains("Grade 2") 
-                                    || g.Name[GatherBuddy.Language].Contains("Grade 3"))))))
+                    .SelectMany(p => p).Any())
                 .Cast<IGatherable>()
                 .Concat(GatherBuddy.GameData.Fishes.Values)
                 .GroupBy(g => g.ItemId)
@@ -125,15 +109,20 @@ public partial class Interface
             _plugin.AutoGatherListsManager.ListOrderChanged -= OnListOrderChanged;
         }
 
-        public int  NewGatherableIdx;
-        public bool EditName;
-        public bool EditDesc;
+        public int             NewGatherableIdx;
+        public bool            EditName;
+        public bool            EditDesc;
+        public string          ItemFilter = string.Empty;
+        public AutoGatherList? ItemFilterList;
     }
 
     private readonly AutoGatherListsCache _autoGatherListsCache;
 
     public AutoGatherList? CurrentAutoGatherList
         => _autoGatherListsCache.Selector.Selected;
+
+    public CraftingListDefinition? CurrentCraftingList
+        => _plugin._vulcanWindow?.CurrentCraftingList;
 
     private void DrawAutoGatherListsLine()
     {
@@ -167,7 +156,8 @@ public partial class Interface
                 var lists = GatherBuddy.AutoGather.ArtisanExporter.GetArtisanListNames();
 
                 float rowHeight       = ImGui.GetTextLineHeightWithSpacing();
-                float totalListHeight = lists.Count * rowHeight;
+                float childPaddingY   = ImGui.GetStyle().WindowPadding.Y * 2f;
+                float totalListHeight = lists.Count * rowHeight + childPaddingY;
                 float totalListWidth  = lists.Max(n => ImGui.CalcTextSize(n.Value).X) + 40;
 
                 float maxHeight   = ImGui.GetIO().DisplaySize.Y * 0.4f;
@@ -200,47 +190,48 @@ public partial class Interface
             {
                 try
                 {
-                    Dictionary<string, int> items = new Dictionary<string, int>();
-
                     // Regex pattern
                     var pattern = @"\b(\d+)x\s(.+)\b";
                     var matches = Regex.Matches(clipboardText, pattern);
 
-                    // Loop through matches and add them to dictionary
-                    foreach (Match match in matches)
-                    {
-                        var quantity = int.Parse(match.Groups[1].Value);
-                        var itemName = match.Groups[2].Value;
-                        items[itemName] = quantity;
-                    }
-
                     var list = _autoGatherListsCache.Selector.Selected!;
 
-                    foreach (var (itemName, quantity) in items)
+                    Dictionary<ReadOnlySeString, uint>? diademItems = null;
+                    Lumina.Excel.ExcelSheet<Lumina.Excel.Sheets.Item>? itemSheet = null;
+                    Dictionary<string, IGatherable> normalItems = new(GatherBuddy.GameData.Gatherables.Count + GatherBuddy.GameData.Fishes.Count);
+                    foreach (var item in ((IEnumerable<IGatherable>)GatherBuddy.GameData.Gatherables.Values).Concat(GatherBuddy.GameData.Fishes.Values))
+                        normalItems[item.Name[GatherBuddy.Language]] = item;
+
+                    foreach (Match match in matches)
                     {
-                        var gatherableItem = GatherBuddy.GameData.Gatherables.Values.FirstOrDefault(g => g.Name[Dalamud.ClientState.ClientLanguage] == itemName);
-                        IGatherable? gatherable = gatherableItem;
-                        
-                        if (gatherableItem != null)
+                        var quantity = uint.Parse(match.Groups[1].Value);
+                        var itemName = match.Groups[2].Value;
+
+                        if (normalItems.TryGetValue(itemName, out var item))
                         {
-                            if (gatherableItem.NodeList.Count == 0 
-                                && !UmbralNodes.IsUmbralItem(gatherableItem.ItemId) 
-                                && !(gatherableItem.NodeList.Any(n => n.Territory.Id is 901 or 929 or 939)
-                                    && (gatherableItem.Name[Dalamud.ClientState.ClientLanguage].Contains("Grade 4")
-                                        || (gatherableItem.Name[Dalamud.ClientState.ClientLanguage].Contains("Artisanal")
-                                            && (gatherableItem.Name[Dalamud.ClientState.ClientLanguage].Contains("Grade 2") 
-                                                || gatherableItem.Name[Dalamud.ClientState.ClientLanguage].Contains("Grade 3"))))))
+                            if (!item.Locations.Any())
                                 continue;
                         }
                         else
                         {
-                            gatherable = GatherBuddy.GameData.Fishes.Values.FirstOrDefault(f => f.Name[Dalamud.ClientState.ClientLanguage] == itemName);
-                            
-                            if (gatherable == null)
+                            itemSheet ??= Dalamud.GameData.GetExcelSheet<Lumina.Excel.Sheets.Item>(GatherBuddy.Language);
+                            diademItems ??= Diadem.ApprovedToRawItemIds
+                                .Select(kv => (itemSheet.GetRow(kv.Key).Name, kv.Value))
+                                .ToDictionary();
+
+                            if (!diademItems.TryGetValue(itemName, out var rawId))
+                                continue;
+
+                            if (GatherBuddy.GameData.Gatherables.TryGetValue(rawId, out var gatherable))
+                                item = gatherable;
+                            else if (GatherBuddy.GameData.Fishes.TryGetValue(rawId, out var fish))
+                                item = fish;
+                            else
                                 continue;
                         }
 
-                        list.Add(gatherable, (uint)quantity);
+                        if(!list.Add(item, quantity))
+                            list.SetQuantity(item, quantity + list.Quantities[item]);
                     }
 
                     _plugin.AutoGatherListsManager.Save();
@@ -257,17 +248,23 @@ public partial class Interface
 
         ImGui.SetCursorPosX(ImGui.GetWindowSize().X - 50);
         string agHelpText =
-            "If the config option to sort by location is not selected, items are gathered in order of enabled list, then order of item in list.\n"
-          + "You can drag and draw lists to move them.\n"
-          + "You can drag and draw items in a specific list to move them.\n"
-          + "You can drag and draw an item onto a different list from the selector to add it to that list and remove it from the current.\n"
-          + "In the Gather Window, you can hold Control and Right-Click an item to delete it from the list it comes from.";
+            "If the config option to sort by location is not selected, items are gathered in the order of the enabled lists, then in the order of items in each list, " +
+            "but timed nodes and fish are always prioritized.\n" +
+            "You can drag and drop lists to move them.\n" +
+            "You can drag and drop items within a specific list to rearrange them.\n" +
+            "You can drag and drop an item onto a different list from the selector to move it between lists.\n" +
+            "In the Gather Window, you can hold Control and Right-Click an item to delete it from the list it belongs to.";
+
 
         ImGuiEx.InfoMarker(agHelpText,                    null, FontAwesomeIcon.InfoCircle.ToIconString(), false);
         ImGuiEx.InfoMarker("Auto-Gather Support Discord", null, FontAwesomeIcon.Comments.ToIconString(),   false);
         if (ImGuiEx.HoveredAndClicked())
         {
-            GenericHelpers.ShellStart("https://discord.gg/p54TZMPnC9");
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "https://discord.gg/p54TZMPnC9",
+                UseShellExecute = true
+            });
         }
     }
 
@@ -290,8 +287,49 @@ public partial class Interface
           + "But if a node doesn't contain any items from regular lists or if you gathered enough of them,\n"
           + "items from fallback lists would be gathered instead if they could be found in that node.",
             list.Fallback, (v) => _plugin.AutoGatherListsManager.SetFallback(list, v));
+        ImGui.SameLine();
+        ImGuiUtil.Checkbox("Remove Completed##list",
+            "Automatically remove enabled items from this list once your inventory reaches the configured quantity for them.",
+            list.RemoveCompletedItems, (v) => _plugin.AutoGatherListsManager.SetRemoveCompletedItems(list, v));
+        if (!ReferenceEquals(_autoGatherListsCache.ItemFilterList, list))
+        {
+            _autoGatherListsCache.ItemFilterList = list;
+            _autoGatherListsCache.ItemFilter     = string.Empty;
+        }
 
-        ImGui.Text($"{list.Items.Count} Items in List");
+        var itemFilter = _autoGatherListsCache.ItemFilter;
+        ImGui.SetNextItemWidth(130f * Scale);
+        if (ImGui.InputTextWithHint("##autoGatherItemFilter", "Search items...", ref itemFilter, 128))
+            _autoGatherListsCache.ItemFilter = itemFilter;
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Filter items by name. Reordering is disabled while a search is active.");
+
+        var filterKeywords = _autoGatherListsCache.ItemFilter.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(keyword => keyword.Trim())
+            .Where(keyword => keyword.Length > 0)
+            .ToArray();
+        var filteringItems   = filterKeywords.Length > 0;
+        var visibleItemIndices = new List<int>(list.Items.Count);
+        for (var i = 0; i < list.Items.Count; ++i)
+        {
+            var itemName = list.Items[i].Name[GatherBuddy.Language].ToString();
+            if (filterKeywords.All(keyword => itemName.Contains(keyword, StringComparison.OrdinalIgnoreCase)))
+                visibleItemIndices.Add(i);
+        }
+
+        var visibleItems = visibleItemIndices.Select(index => list.Items[index]).ToList();
+        var bulkActionButtonSize = new Vector2(ImGui.GetFrameHeight() + 6f * Scale, ImGui.GetFrameHeight());
+
+        ImGui.SameLine();
+        if (DrawAutoGatherIconButton("EnableVisibleItems", FontAwesomeIcon.Check.ToIconString(), bulkActionButtonSize, "Enable visible items in this list.", visibleItems.Count == 0))
+            _plugin.AutoGatherListsManager.ChangeEnabled(list, visibleItems, true);
+
+        ImGui.SameLine();
+        if (DrawAutoGatherIconButton("DisableVisibleItems", FontAwesomeIcon.Ban.ToIconString(), bulkActionButtonSize, "Disable visible items in this list.", visibleItems.Count == 0))
+            _plugin.AutoGatherListsManager.ChangeEnabled(list, visibleItems, false);
+
+        ImGui.SameLine();
+        ImGui.Text($"{visibleItems.Count} / {list.Items.Count} Items in List");
         ImGui.NewLine();
         ImGui.SetCursorPosX(ImGui.GetCursorPosX() - ImGui.GetStyle().ItemInnerSpacing.X);
         using var box = ImRaii.ListBox("##gatherWindowList", new Vector2(-1.5f * ImGui.GetStyle().ItemSpacing.X, -1));
@@ -303,8 +341,9 @@ public partial class Interface
         var selector    = _autoGatherListsCache.GatherableSelector;
         int changeIndex = -1, changeItemIndex = -1, deleteIndex = -1;
 
-        for (var i = 0; i < list.Items.Count; ++i)
+        for (var visibleIdx = 0; visibleIdx < visibleItemIndices.Count; ++visibleIdx)
         {
+            var       i     = visibleItemIndices[visibleIdx];
             var       item  = list.Items[i];
             using var id    = ImRaii.PushId((int)item.ItemId);
             using var group = ImRaii.Group();
@@ -326,7 +365,7 @@ public partial class Interface
 
             ImGui.SameLine();
             ImGui.Text("Inventory: ");
-            var invTotal = item.GetInventoryCount();
+            var invTotal = item.GetTotalCount();
             ImGui.SameLine(0f, ImGui.CalcTextSize($"0000 / ").X - ImGui.CalcTextSize($"{invTotal} / ").X);
             ImGui.Text($"{invTotal} / ");
             ImGui.SameLine(0, 3f);
@@ -339,28 +378,33 @@ public partial class Interface
                 _plugin.AutoGatherListsManager.ChangePreferredLocation(list, item, newLoc);
             group.Dispose();
 
-            // Custom drag-drop for moving items within and between lists
-            using (var source = ImRaii.DragDropSource())
+            if (!filteringItems)
             {
-                if (source.Success)
+                using (var source = ImRaii.DragDropSource())
                 {
-                    _dragDropData = new AutoGatherListsDragDropData(list, item, i);
-                    // api13 binding takes ReadOnlySpan<byte> for the payload; OtterGui itself passes null
-                    unsafe { ImGui.SetDragDropPayload("AutoGatherListItem", null, 0); }
-                    ImGui.TextUnformatted(item.Name[GatherBuddy.Language]);
+                    if (source.Success)
+                    {
+                        _autoGatherListsCache.Selector.DragDropItem = new AutoGatherListsDragDropData(list, item, i);
+                        ImGui.SetDragDropPayload(AutoGatherListsDragDropData.Label, []);
+                        ImGui.TextUnformatted(item.Name[GatherBuddy.Language]);
+                    }
                 }
-            }
 
-            var localIdx = i;
-            using (var target = ImRaii.DragDropTarget())
-            {
-                if (target.Success && ImGuiUtil.IsDropping("AutoGatherListItem") && _dragDropData != null)
+                var localIdx = i;
+                using (var target = ImRaii.DragDropTarget())
                 {
-                    _plugin.AutoGatherListsManager.MoveItem(_dragDropData.list, _dragDropData.ItemIdx, localIdx);
-                    _dragDropData = null;
+                    var dragDropData = _autoGatherListsCache.Selector.DragDropItem;
+                    if (target.Success && ImGuiUtil.IsDropping(AutoGatherListsDragDropData.Label) && dragDropData != null)
+                    {
+                        _plugin.AutoGatherListsManager.MoveItem(dragDropData.List, dragDropData.ItemIdx, localIdx);
+                        _autoGatherListsCache.Selector.DragDropItem = null;
+                    }
                 }
             }
         }
+
+        if (visibleItemIndices.Count == 0)
+            ImGui.TextDisabled("No matching items.");
 
         if (deleteIndex >= 0)
             _plugin.AutoGatherListsManager.RemoveItem(list, deleteIndex);
@@ -376,7 +420,8 @@ public partial class Interface
         var allEnabled = list.Items.All(i => list.EnabledItems[i]);
         if (ImGui.Checkbox("##AllEnabled", ref allEnabled))
         {
-            list.Items.Each(i => _plugin.AutoGatherListsManager.ChangeEnabled(list, i, allEnabled));
+            foreach (var i in list.Items)
+                _plugin.AutoGatherListsManager.ChangeEnabled(list, i, allEnabled);
         }
         ImGuiUtil.HoverTooltip((allEnabled ? "Disable" : "Enable" ) + " all items in the list");
 
@@ -386,6 +431,45 @@ public partial class Interface
             _autoGatherListsCache.NewGatherableIdx = idx;
             _plugin.AutoGatherListsManager.AddItem(list, gatherables[_autoGatherListsCache.NewGatherableIdx]);
         }
+    }
+
+    private static bool DrawAutoGatherIconButton(string id, string iconText, Vector2 size, string tooltip, bool disabled = false)
+    {
+        var hoveredFlags = disabled ? ImGuiHoveredFlags.AllowWhenDisabled : ImGuiHoveredFlags.None;
+
+        bool DrawCenteredButton()
+        {
+            using var font = ImRaii.PushFont(UiBuilder.IconFont);
+            var cursor = ImGui.GetCursorScreenPos();
+            var iconSize = ImGui.CalcTextSize(iconText);
+
+            bool clicked;
+            using (ImRaii.PushId(id))
+                clicked = ImGui.Button(string.Empty, size);
+
+            var iconPos = cursor + ((size - iconSize) / 2f);
+            ImGui.GetWindowDrawList().AddText(iconPos, ImGui.GetColorU32(ImGuiCol.Text), iconText);
+            return clicked;
+        }
+
+        if (disabled)
+        {
+            bool hovered;
+            using (ImRaii.Disabled())
+            {
+                DrawCenteredButton();
+                hovered = ImGui.IsItemHovered(hoveredFlags);
+            }
+
+            if (hovered)
+                ImGui.SetTooltip(tooltip);
+            return false;
+        }
+
+        var result = DrawCenteredButton();
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(tooltip);
+        return result;
     }
 
     private void DrawAutoGatherTab()
@@ -405,7 +489,7 @@ public partial class Interface
         using (var child = ImRaii.Child("AutoGatherListSelector", new Vector2(selectorWidth, -1), false))
         {
             if (child)
-                _autoGatherListsCache.Selector.Draw();  // OtterGui HEAD sizes the selector internally (GetSizeInternal)
+                _autoGatherListsCache.Selector.Draw();
         }
 
         ImGui.SameLine();
@@ -425,5 +509,8 @@ public partial class Interface
             if (_autoGatherListsCache.Selector.Selected != null)
                 DrawAutoGatherList(_autoGatherListsCache.Selector.Selected);
         });
+
+        _autoGatherListsCache.Selector.DrawBaitBuyListResultPopup();
     }
 }
+

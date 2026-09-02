@@ -1,5 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);CS1591;MSB3277</NoWarn>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <PropertyGroup>
     <TargetFramework>net9.0-windows</TargetFramework>
     <LangVersion>preview</LangVersion>
     <PlatformTarget>x64</PlatformTarget>
@@ -12,45 +19,68 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <Configurations>Debug;Release</Configurations>
     <Platforms>x64</Platforms>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <NoWarn>CS1591;MSB3277</NoWarn>
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>
 
   <PropertyGroup>
-    <DalamudLibPath>$(MSBuildThisFileDirectory)..\..\..\TC_ok\_dalamud_api13\</DalamudLibPath>
+    <Use_DalamudPackager>false</Use_DalamudPackager>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\GatherBuddy.Levenshtein\GatherBuddy.Levenshtein.csproj" />
-    <ProjectReference Include="..\OtterGui\OtterGui.csproj" />
+    <ProjectReference Include="..\ElliLib\ElliLib.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(DalamudLibPath)Newtonsoft.Json.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Serilog">
+      <HintPath>$(DalamudLibPath)Serilog.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="ImGuiScene">
+      <HintPath>$(DalamudLibPath)ImGuiScene.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Dalamud">
+      <HintPath>$(DalamudLibPath)Dalamud.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Dalamud.Common">
+      <HintPath>$(DalamudLibPath)Dalamud.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Dalamud.Bindings.ImGui">
+      <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImGui.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Lumina">
+      <HintPath>$(DalamudLibPath)Lumina.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Lumina.Excel">
+      <HintPath>$(DalamudLibPath)Lumina.Excel.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="FFXIVClientStructs">
+      <HintPath>$(DalamudLibPath)FFXIVClientStructs.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="InteropGenerator.Runtime">
+      <HintPath>$(DalamudLibPath)InteropGenerator.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Dalamud.Bindings.ImPlot">
+      <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImPlot.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Dalamud.Bindings.ImGuizmo">
+      <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImGuizmo.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
-  <ItemGroup>
-    <Reference Include="Dalamud" Private="false">
-      <HintPath>$(DalamudLibPath)Dalamud.dll</HintPath>
-    </Reference>
-    <Reference Include="ImGui.NET" Private="false">
-      <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImGui.dll</HintPath>
-    </Reference>
-        <Reference Include="Dalamud.Bindings.ImPlot">
-            <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImPlot.dll</HintPath>
-            <Private>False</Private>
-        </Reference>
-    <Reference Include="Lumina" Private="false">
-      <HintPath>$(DalamudLibPath)Lumina.dll</HintPath>
-    </Reference>
-    <Reference Include="Lumina.Excel" Private="false">
-      <HintPath>$(DalamudLibPath)Lumina.Excel.dll</HintPath>
-    </Reference>
-    <Reference Include="FFXIVClientStructs" Private="false">
-      <HintPath>$(DalamudLibPath)FFXIVClientStructs.dll</HintPath>
-    </Reference>
-    <Reference Include="InteropGenerator.Runtime" Private="false">
-      <HintPath>$(DalamudLibPath)InteropGenerator.Runtime.dll</HintPath>
-    </Reference>
-    <Reference Include="Newtonsoft.Json" Private="false">
-      <HintPath>$(DalamudLibPath)Newtonsoft.Json.dll</HintPath>
-    </Reference>
-  </ItemGroup>
+  <PropertyGroup>
+    <DalamudLibPath>$(MSBuildThisFileDirectory)..\..\..\TC_ok\_dalamud_api13\</DalamudLibPath>
+  </PropertyGroup>
 </Project>

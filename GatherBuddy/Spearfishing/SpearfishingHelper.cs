@@ -1,4 +1,4 @@
-﻿using System.Collections.Frozen;
+using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
 using Dalamud.Game.ClientState.Objects.Enums;
@@ -6,6 +6,7 @@ using GatherBuddy.Enums;
 using GatherBuddy.SeFunctions;
 using Lumina.Excel.Sheets;
 using FishingSpot = GatherBuddy.Classes.FishingSpot;
+using SpearfishSize = GatherBuddy.Enums.SpearfishSize;
 
 namespace GatherBuddy.Spearfishing;
 
@@ -36,9 +37,10 @@ public partial class SpearfishingHelper
             SpearfishingSpots.Add(point.RowId, node);
         }
 
-        IsOpen             = GatherBuddy.Config.ShowSpearfishHelper;
-        RespectCloseHotkey = false;
-        Namespace          = "SpearfishingHelper";
+        IsOpen              = GatherBuddy.Config.ShowSpearfishHelper;
+        RespectCloseHotkey  = false;
+        DisableWindowSounds = true;
+        Namespace           = "SpearfishingHelper";
     }
 
     // We should always have to target a spearfishing spot when opening the window.
@@ -51,7 +53,7 @@ public partial class SpearfishingHelper
         if (Dalamud.Targets.Target.ObjectKind != ObjectKind.GatheringPoint)
             return null;
 
-        var id = Dalamud.Targets.Target.DataId;
+        var id = Dalamud.Targets.Target.BaseId;
         return SpearfishingSpots.GetValueOrDefault(id);
     }
 
@@ -66,8 +68,7 @@ public partial class SpearfishingHelper
 
         var fishes = spot.Items.Where(f =>
                 (f.Speed == info.Speed || f.Speed == SpearfishSpeed.Unknown)
-             && (f.Size == info.Size || f.Size == SpearfishSize.Unknown))
-            .ToList();
-        return fishes.Count == 0 ? unknown : string.Join("\n", fishes.Select(f => f.Name[GatherBuddy.Language]));
+             && (f.Size == info.Size || f.Size == SpearfishSize.None));
+        return fishes.Any() ? string.Join("\n", fishes.Select(f => f.Name[GatherBuddy.Language])) : unknown;
     }
 }

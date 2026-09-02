@@ -39,6 +39,8 @@ public enum Patch : ushort
     Crossroads                 = 710,
     SeekersOfEternity          = 720,
     ThePromiseOfTomorrow       = 730,
+    IntoTheMist                = 740,
+    TrailToTheHeavens          = 750,
 }
 
 [Flags]
@@ -78,6 +80,8 @@ public enum PatchFlag : ulong
     Crossroads                 = 1ul << 31,
     SeekersOfEternity          = 1ul << 32,
     ThePromiseOfTomorrow       = 1ul << 33,
+    IntoTheMist                = 1ul << 34,
+    TrailToTheHeavens          = 1ul << 35,
 }
 
 public static class PatchExtensions
@@ -88,7 +92,7 @@ public static class PatchExtensions
     public static byte ToMinor(this Patch value)
     {
         var val = (ushort)value % 100;
-        if (val % 10 == 0)
+        if (val % 10 is 0)
             return (byte)(val / 10);
 
         return (byte)val;
@@ -138,6 +142,8 @@ public static class PatchExtensions
             71 => "Crossroads",
             72 => "Seekers of Eternity",
             73 => "The Promise of Tomorrow",
+            74 => "Into the Mist",
+            75 => "Trail to the Heavens",
             _  => "Unknown",
         };
     }
@@ -180,6 +186,8 @@ public static class PatchExtensions
             Patch.Crossroads                 => PatchFlag.Crossroads,
             Patch.SeekersOfEternity          => PatchFlag.SeekersOfEternity,
             Patch.ThePromiseOfTomorrow       => PatchFlag.ThePromiseOfTomorrow,
+            Patch.IntoTheMist                => PatchFlag.IntoTheMist,
+            Patch.TrailToTheHeavens          => PatchFlag.TrailToTheHeavens,
             _                                => 0,
         };
     }
@@ -222,6 +230,8 @@ public static class PatchExtensions
             PatchFlag.Crossroads                 => Patch.Crossroads,
             PatchFlag.SeekersOfEternity          => Patch.SeekersOfEternity,
             PatchFlag.ThePromiseOfTomorrow       => Patch.ThePromiseOfTomorrow,
+            PatchFlag.IntoTheMist                => Patch.IntoTheMist,
+            PatchFlag.TrailToTheHeavens          => Patch.TrailToTheHeavens,
             _                                    => Patch.Unknown,
         };
     }

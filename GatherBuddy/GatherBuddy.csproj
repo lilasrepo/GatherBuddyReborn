@@ -1,14 +1,21 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <NoWarn>$(NoWarn);CS1591;MSB3277</NoWarn>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <PropertyGroup>
     <TargetFramework>net9.0-windows</TargetFramework>
     <LangVersion>preview</LangVersion>
     <PlatformTarget>x64</PlatformTarget>
     <RootNamespace>GatherBuddy</RootNamespace>
     <AssemblyName>GatherBuddyReborn</AssemblyName>
-    <Version>7.2.4.2</Version>
+    <Version>7.5.0.0</Version>
     <Company>SoftOtter</Company>
     <Product>GatherBuddy</Product>
-    <Copyright>Copyright © 2025</Copyright>
+    <Copyright>Copyright © 2026</Copyright>
     <Deterministic>true</Deterministic>
     <OutputType>Library</OutputType>
     <WarningLevel>4</WarningLevel>
@@ -16,30 +23,30 @@
     <MSBuildWarningsAsMessages>$(MSBuildWarningsAsMessages);MSB3277</MSBuildWarningsAsMessages>
     <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
-    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+    <CopyLocalLockfileAssemblies>true</CopyLocalLockfileAssemblies>
     <Configurations>Debug;Release</Configurations>
     <Platforms>x64</Platforms>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <NoWarn>CS1591;MSB3277</NoWarn>
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-  </PropertyGroup>
-
-  <PropertyGroup>
-    <DalamudLibPath>$(MSBuildThisFileDirectory)..\..\..\TC_ok\_dalamud_api13\</DalamudLibPath>
-  </PropertyGroup>
+    <Name>GatherBuddy Reborn</Name>
+    <Author>The Combat Reborn Team</Author>
+    <Description>Adds commands to simplify gathering by finding nodes and fish and their locations via item name and a UI to keep track of special uptime and weather conditions. Also automatically gathers items based on these conditions using lists that you specify. Automated gathering requires vnavmesh.</Description>
+    <Punchline>Simplify Gathering and Fishing to the extreme.</Punchline>
+	</PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="AutoGather\GatheringTracker.cs" />
     <Compile Remove="Plugin\AutoGather.cs" />
   </ItemGroup>
 
   <ItemGroup>
     <None Remove="CustomInfo\IlvConvertTable.csv" />
+    <None Remove="CustomInfo\mob_drop_overrides.json" />
     <None Remove="CustomInfo\world_locations.json" />
   </ItemGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="CustomInfo\world_locations.json" />
+    <EmbeddedResource Include="CustomInfo\mob_drop_overrides.json" />
     <None Remove="CustomInfo\node_offsets.json" />
     <EmbeddedResource Include="CustomInfo\node_offsets.json" />
     <None Remove="CustomInfo\honk-sound.wav" />
@@ -48,64 +55,86 @@
 
   <ItemGroup>
     <PackageReference Include="CSCore" Version="1.2.1.2" />
-    <PackageReference Include="DalamudPackager" Version="13.1.0" />
+    <PackageReference Include="LuminaSupplemental.Excel" Version="3.0.7" />
     <PackageReference Include="MessagePack" Version="3.1.3" />
   </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\ECommons\ECommons\ECommons.csproj" />
-    <ProjectReference Include="..\GatherBuddy.GameData\GatherBuddy.GameData.csproj" />
-    <ProjectReference Include="..\GatherBuddy.Models\GatherBuddy.Models.csproj" />
-    <ProjectReference Include="..\OtterGui\OtterGui.csproj" />
-  </ItemGroup>
+	<ItemGroup>
+	  <ProjectReference Include="..\GatherBuddy.GameData\GatherBuddy.GameData.csproj" />
+	  <ProjectReference Include="..\GatherBuddy.Models\GatherBuddy.Models.csproj" />
+	  <ProjectReference Include="..\ElliLib\ElliLib.csproj" />
+	  <ProjectReference Include="..\ElliCon\ElliCon.csproj" />
+	</ItemGroup>
 
+	<ItemGroup>
+	  <Folder Include="AutoGather\Tasks\" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <EmbeddedResource Include="CustomInfo\IlvConvertTable.csv" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <EmbeddedResource Include="CustomInfo\fish_records.json" />
+	</ItemGroup>
   <ItemGroup>
-    <Reference Include="Dalamud" Private="false">
-      <HintPath>$(DalamudLibPath)Dalamud.dll</HintPath>
-    </Reference>
-    <Reference Include="ImGui.NET" Private="false">
-      <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImGui.dll</HintPath>
-    </Reference>
-        <Reference Include="Dalamud.Bindings.ImPlot">
-            <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImPlot.dll</HintPath>
-            <Private>False</Private>
-        </Reference>
-    <Reference Include="ImGuiScene" Private="false">
-      <HintPath>$(DalamudLibPath)ImGuiScene.dll</HintPath>
-    </Reference>
-    <Reference Include="Lumina" Private="false">
-      <HintPath>$(DalamudLibPath)Lumina.dll</HintPath>
-    </Reference>
-    <Reference Include="Lumina.Excel" Private="false">
-      <HintPath>$(DalamudLibPath)Lumina.Excel.dll</HintPath>
-    </Reference>
-    <Reference Include="FFXIVClientStructs" Private="false">
-      <HintPath>$(DalamudLibPath)FFXIVClientStructs.dll</HintPath>
-    </Reference>
-    <Reference Include="InteropGenerator.Runtime" Private="false">
-      <HintPath>$(DalamudLibPath)InteropGenerator.Runtime.dll</HintPath>
-    </Reference>
-    <Reference Include="Newtonsoft.Json" Private="false">
+    <PackageReference Include="DalamudPackager" Version="13.1.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="Newtonsoft.Json">
       <HintPath>$(DalamudLibPath)Newtonsoft.Json.dll</HintPath>
+      <Private>false</Private>
     </Reference>
-    <Reference Include="Serilog" Private="false">
+    <Reference Include="Serilog">
       <HintPath>$(DalamudLibPath)Serilog.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="ImGuiScene">
+      <HintPath>$(DalamudLibPath)ImGuiScene.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Dalamud">
+      <HintPath>$(DalamudLibPath)Dalamud.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Dalamud.Common">
+      <HintPath>$(DalamudLibPath)Dalamud.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Dalamud.Bindings.ImGui">
+      <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImGui.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Lumina">
+      <HintPath>$(DalamudLibPath)Lumina.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Lumina.Excel">
+      <HintPath>$(DalamudLibPath)Lumina.Excel.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="FFXIVClientStructs">
+      <HintPath>$(DalamudLibPath)FFXIVClientStructs.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="InteropGenerator.Runtime">
+      <HintPath>$(DalamudLibPath)InteropGenerator.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Dalamud.Bindings.ImPlot">
+      <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImPlot.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Dalamud.Bindings.ImGuizmo">
+      <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImGuizmo.dll</HintPath>
+      <Private>false</Private>
     </Reference>
   </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="AutoGather\Tasks\" />
-  </ItemGroup>
 
-  <ItemGroup>
-    <EmbeddedResource Include="CustomInfo\IlvConvertTable.csv" />
-  </ItemGroup>
 
-  <ItemGroup>
-    <EmbeddedResource Include="CustomInfo\fish_records.json" />
-  </ItemGroup>
 
-  <ItemGroup>
-    <EmbeddedResource Include="CustomInfo\ScripShopItems.json" />
-  </ItemGroup>
+  <PropertyGroup>
+    <DalamudLibPath>$(MSBuildThisFileDirectory)..\..\..\TC_ok\_dalamud_api13\</DalamudLibPath>
+  </PropertyGroup>
 </Project>

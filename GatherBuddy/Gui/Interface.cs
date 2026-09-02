@@ -6,7 +6,7 @@ using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
 using GatherBuddy.Time;
 using Functions = GatherBuddy.Plugin.Functions;
-using ImRaii = OtterGui.Raii.ImRaii;
+using ImRaii = ElliLib.Raii.ImRaii;
 
 namespace GatherBuddy.Gui;
 

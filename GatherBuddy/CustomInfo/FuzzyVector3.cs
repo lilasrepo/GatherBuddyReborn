@@ -1,11 +1,11 @@
-﻿using GatherBuddy.Plugin;
+using GatherBuddy.Plugin;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Text;
 using System.Threading.Tasks;
-using ECommons.GameHelpers;
+using GatherBuddy.Helpers;
 
 namespace GatherBuddy.CustomInfo
 {
@@ -13,7 +13,7 @@ namespace GatherBuddy.CustomInfo
     {
         public static float DistanceToPlayer(this Vector3 vector)
         {
-            var distance = Vector3.Distance(vector, Player.Object.Position);
+            var distance = Vector3.Distance(vector, Player.Position);
             return distance;
         }
     }

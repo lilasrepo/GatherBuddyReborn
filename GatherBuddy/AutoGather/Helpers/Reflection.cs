@@ -4,12 +4,11 @@ using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using Dalamud.Plugin;
-using ECommons.DalamudServices;
-using ECommons.ExcelServices;
-using ECommons.Reflection;
 using GatherBuddy.AutoGather.Lists;
 using GatherBuddy.Gui;
+using GatherBuddy.Interfaces;
 using GatherBuddy.Plugin;
+using GatherBuddy.Utility;
 
 namespace GatherBuddy.AutoGather.Helpers
 {
@@ -27,10 +26,10 @@ namespace GatherBuddy.AutoGather.Helpers
             public IDalamudPlugin? ArtisanAssemblyInstance;
 
             public bool ArtisanAssemblyEnabled
-                => DalamudReflector.TryGetDalamudPlugin("Artisan", out _, false, true);
+                => ReflectionHelpers.TryGetDalamudPlugin("Artisan", out _);
 
             public bool TouchArtisanAssembly
-                => DalamudReflector.TryGetDalamudPlugin("Artisan", out ArtisanAssemblyInstance, out _, false, true);
+                => ReflectionHelpers.TryGetDalamudPlugin("Artisan", out ArtisanAssemblyInstance);
 
             public Dictionary<int, string> GetArtisanListNames()
             {
@@ -39,6 +38,7 @@ namespace GatherBuddy.AutoGather.Helpers
                 {
                     if (TouchArtisanAssembly)
                     {
+#pragma warning disable CS8600, CS8602, CS8604, CS8605 // Null handled by catch block
                         System.Collections.IList artisanCraftingLists = (System.Collections.IList)ArtisanAssemblyInstance.GetFoP("Config").GetFoP("NewCraftingLists");
                         foreach (var list in artisanCraftingLists)
                         {
@@ -47,12 +47,13 @@ namespace GatherBuddy.AutoGather.Helpers
                             if (name != null)
                                 listNames.Add(id, name);
                         }
+#pragma warning restore CS8600, CS8602, CS8604, CS8605
                     }
                     return listNames;
                 }
                 catch (Exception e)
                 {
-                    Svc.Log.Error(e, "Error while getting Artisan List names: ");
+                    GatherBuddy.Log.Error($"Error while getting Artisan List names: {e}");
                     return listNames;
                 }
             }
@@ -66,6 +67,7 @@ namespace GatherBuddy.AutoGather.Helpers
             {
                 try
                 {
+#pragma warning disable CS8600, CS8602, CS8604, CS8605 // Null handled by catch block
                     if (TouchArtisanAssembly)
                     {
                         System.Collections.IList artisanCraftingLists = (System.Collections.IList)ArtisanAssemblyInstance.GetFoP("Config").GetFoP("NewCraftingLists");
@@ -75,7 +77,7 @@ namespace GatherBuddy.AutoGather.Helpers
                         var targetList = artisanCraftingLists.Cast<object>().SingleOrDefault(l => (int)l.GetFoP("ID") == listKvp.Key);
                         if (targetList == null)
                         {
-                            Svc.Log.Error($"Artisan list '{listKvp.Value}' ({listKvp.Key}) could not be found");
+                            GatherBuddy.Log.Error($"Artisan list '{listKvp.Value}' ({listKvp.Key}) could not be found");
                             return false;
                         }
 
@@ -86,20 +88,30 @@ namespace GatherBuddy.AutoGather.Helpers
                         list.Description = "Imported from Artisan";
                         foreach (var (itemId, quantity) in matList)
                         {
-                            var gatherable = GatherBuddy.GameData.Gatherables.FirstOrDefault(g => g.Key == itemId);
-                            if (gatherable.Value == null || gatherable.Value.NodeList.Count == 0)
+                            if (!Diadem.ApprovedToRawItemIds.TryGetValue(itemId, out var mappedItemId))
+                                mappedItemId = itemId;
+
+                            IGatherable? item = null;
+                            if (GatherBuddy.GameData.Gatherables.TryGetValue(mappedItemId, out var gatherable))
+                                item = gatherable;
+                            else if (GatherBuddy.GameData.Fishes.TryGetValue(mappedItemId, out var fish))
+                                item = fish;
+
+                            if (item == null || !item.Locations.Any())
                                 continue;
-                            list.Add(gatherable.Value, (uint)quantity);
+
+                            list.Add(item, (uint)quantity);
                         }
                         _listsManager.AddList(list);
                         Communicator.Print($"List '{listKvp.Value}' imported successfully!");
                         return true;
                     }
                     return false;
+#pragma warning restore CS8600, CS8602, CS8604, CS8605
                 }
                 catch (Exception e)
                 {
-                    Svc.Log.Error(e, "Error while importing Artisan List: ");
+                    GatherBuddy.Log.Error($"Error while importing Artisan List: {e}");
                     throw;
                 }
             }
@@ -126,7 +138,7 @@ namespace GatherBuddy.AutoGather.Helpers
             //             var targetList = artisanCraftingLists.Cast<object>().SingleOrDefault(l => l.GetFoP("Name").ToString() == listName);
             //             if (targetList == null)
             //             {
-            //                 Svc.Log.Error("Artisan Crafting List not found. Artisan List name must be identical to the Auto-Gather List name.");
+            //                 GatherBuddy.Log.Error("Artisan Crafting List not found. Artisan List name must be identical to the Auto-Gather List name.");
             //                 return null;
             //             }
             //
@@ -149,7 +161,7 @@ namespace GatherBuddy.AutoGather.Helpers
             //     }
             //     catch (Exception e)
             //     {
-            //         Svc.Log.Error(e, "Error while importing Artisan List: ");
+            //         GatherBuddy.Log.Error(e, "Error while importing Artisan List: ");
             //         throw;
             //     }
             // }

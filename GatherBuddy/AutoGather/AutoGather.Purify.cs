@@ -2,10 +2,9 @@ using System;
 using FFXIVClientStructs.FFXIV.Client.Game;
 using GatherBuddy.Plugin;
 using Dalamud.Game.ClientState.Conditions;
-using PurifyResult = ECommons.UIHelpers.AddonMasterImplementations.AddonMaster.PurifyResult;
-using ECommons.Automation;
-using ECommons.DalamudServices;
-using ECommons.EzSharedDataManager;
+using GatherBuddy.Automation;
+using GatherBuddy.AutoGather.Collectables;
+using PurifyResult = GatherBuddy.Automation.AddonMaster.PurifyResult;
 
 namespace GatherBuddy.AutoGather
 {
@@ -13,53 +12,43 @@ namespace GatherBuddy.AutoGather
     {
         private bool HasReducibleItems()
         {
-            if (!GatherBuddy.Config.AutoGatherConfig.DoReduce || Svc.Condition[ConditionFlag.Mounted])
+            if (!GatherBuddy.Config.AutoGatherConfig.DoReduce || Dalamud.Conditions[ConditionFlag.Mounted])
                 return false;
 
-            if (!QuestManager.IsQuestComplete(67633)) // No Longer a Collectable
+            if (!QuestManager.IsQuestComplete(67633))
             {
-                GatherBuddy.Config.AutoGatherConfig.DoReduce = false;
-                Communicator.PrintError(
-                    "[GatherBuddyReborn] Aetherial reduction is enabled, but the relevant quest has not been completed yet. The feature has been disabled.");
-                return false;
-            }
-
-            unsafe
-            {
-                var manager = InventoryManager.Instance();
-                if (manager == null)
-                    return false;
-
-                foreach (var invType in InventoryTypes)
+                if (!_autoRetainerMultiModeEnabled && string.IsNullOrEmpty(_originalCharacterNameWorld))
                 {
-                    var container = manager->GetInventoryContainer(invType);
-                    if (container == null || !container->IsLoaded)
-                        continue;
-
-                    for (int i = 0; i < container->Size; i++)
-                    {
-                        var slot = container->GetInventorySlot(i);
-                        if (slot != null && slot->ItemId != 0)
-                        {
-                            // Check regular gatherables
-                            if (GatherBuddy.GameData.Gatherables.TryGetValue(slot->ItemId, out var gatherable)
-                             && gatherable.ItemData.AetherialReduce != 0)
-                            {
-                                return true;
-                            }
-                            
-                            // Check fish
-                            if (GatherBuddy.GameData.Fishes.TryGetValue(slot->ItemId, out var fish)
-                             && fish.ItemData.AetherialReduce != 0)
-                            {
-                                return true;
-                            }
-                        }
-                    }
+                    GatherBuddy.Config.AutoGatherConfig.DoReduce = false;
+                    Communicator.PrintError(
+                        "[GatherBuddyReborn] Aetherial reduction is enabled, but the relevant quest has not been completed yet. The feature has been disabled.");
                 }
-
+                GatherBuddy.Log.Debug($"[Reduction] Skipping reduction - quest not complete. AR MultiMode: {_autoRetainerMultiModeEnabled}, Original Character: {_originalCharacterNameWorld ?? "null"}");
                 return false;
             }
+
+            var items = ItemHelper.GetCurrentInventoryItems();
+            foreach (var item in items)
+            {
+                if (!item.IsCollectable)
+                    continue;
+
+                // Check regular gatherables
+                if (GatherBuddy.GameData.Gatherables.TryGetValue(item.BaseItemId, out var gatherable)
+                 && gatherable.ItemData.AetherialReduce != 0)
+                {
+                    return true;
+                }
+                
+                // Check fish
+                if (GatherBuddy.GameData.Fishes.TryGetValue(item.BaseItemId, out var fish)
+                 && fish.ItemData.AetherialReduce != 0)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private unsafe void ReduceItems(bool reduceAll, Action? onComplete = null)
@@ -75,10 +64,10 @@ namespace GatherBuddy.AutoGather
             }
 
             TaskManager.Enqueue(ReduceFirstItem,                                3000, true, "Reduce first item");
-            TaskManager.Enqueue(() => !Svc.Condition[ConditionFlag.Occupied39], 5000, true, "Wait until first item reduction is complete");
+            TaskManager.Enqueue(() => !Dalamud.Conditions[ConditionFlag.Occupied39], 5000, true, "Wait until first item reduction is complete");
             TaskManager.DelayNext(delay);
             TaskManager.Enqueue(StartAutoReduction,                             1000, true, "Start auto reduction");
-            TaskManager.Enqueue(() => !Svc.Condition[ConditionFlag.Occupied39], 180000, true, "Wait until all items have been reduced");
+            TaskManager.Enqueue(() => !Dalamud.Conditions[ConditionFlag.Occupied39], 180000, true, "Wait until all items have been reduced");
             TaskManager.DelayNext(delay);
             TaskManager.Enqueue(() =>
             {

@@ -4,9 +4,8 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using Dalamud.Game.Text;
 using Dalamud.Utility;
-using ECommons;
-using ECommons.DalamudServices;
-using ECommons.UIHelpers.AddonMasterImplementations;
+using GatherBuddy.Automation;
+using GatherBuddy.Plugin;
 using FFXIVClientStructs.FFXIV.Component.GUI;
 using Lumina.Excel.Sheets;
 
@@ -25,45 +24,56 @@ namespace GatherBuddy.AutoGather
         private unsafe bool HandleFishingCollectable()
         {
             if (!GatherBuddy.Config.AutoGatherConfig.AutoCollectablesFishing)
-            {
-                GatherBuddy.Log.Debug("[AutoCollectable] Feature disabled in config");
                 return false;
-            }
 
             var addon = SelectYesnoAddon;
-            if (addon == null)
+            if (addon == null || !addon->IsReady)
                 return false;
-            
-            if (!addon->IsReady)
-            {
-                GatherBuddy.Log.Debug("[AutoCollectable] SelectYesno addon not ready");
-                return false;
-            }
-            
-            GatherBuddy.Log.Debug("[AutoCollectable] SelectYesno addon found and ready");
 
             var master = new AddonMaster.SelectYesno(addon);
             var text = master.TextLegacy;
 
             if (!CollectablePatterns.Any(text.Contains))
-                return false;
-
-            GatherBuddy.Log.Debug($"[AutoCollectable] Detected collectable dialog with text: {text}");
-
-            var name = Enum.GetValues<SeIconChar>()
-                .Cast<SeIconChar>()
-                .Aggregate(addon->AtkValues[15].String.AsDalamudSeString().GetText(), 
-                    (current, enumValue) => current.Replace(enumValue.ToIconString(), ""))
-                .Trim();
-
-            if (GenericHelpers.FindRow<Item>(x => x.IsCollectable && !x.Singular.IsEmpty && 
-                name.Contains(x.Singular.GetText(), StringComparison.InvariantCultureIgnoreCase)) is not { RowId: > 0 } item)
             {
-                GatherBuddy.Log.Debug($"[AutoCollectable] Failed to match any collectable to {name} [original={addon->AtkValues[15].String}]");
+                GatherBuddy.Log.Debug($"[AutoCollectable] SelectYesno prompt did not match collectable patterns: {text}");
                 return false;
             }
 
-            GatherBuddy.Log.Debug($"[AutoCollectable] Detected item [{item.RowId}] {item.Name}");
+            GatherBuddy.Log.Debug($"[AutoCollectable] Detected collectable dialog with text: {text}");
+
+            if (addon->AtkValuesCount < 15)
+            {
+                GatherBuddy.Log.Debug($"[AutoCollectable] Not enough AtkValues ({addon->AtkValuesCount}), cannot read item ID");
+                return false;
+            }
+            
+            var itemIdEncoded = addon->AtkValues[14].UInt;
+            if (itemIdEncoded < 500000)
+            {
+                GatherBuddy.Log.Debug($"[AutoCollectable] Invalid encoded item ID: {itemIdEncoded}");
+                return false;
+            }
+            
+            var itemId = itemIdEncoded - 500000;
+            GatherBuddy.Log.Debug($"[AutoCollectable] Extracted item ID: {itemId} (from encoded value {itemIdEncoded})");
+
+            var itemSheet = Dalamud.GameData.GetExcelSheet<Item>();
+            var item = itemSheet.GetRowOrDefault(itemId);
+            
+            if (item == null || item.Value.RowId == 0)
+            {
+                GatherBuddy.Log.Debug($"[AutoCollectable] Failed to find item with ID {itemId}");
+                return false;
+            }
+            
+            var itemValue = item.Value;
+            if (!itemValue.IsCollectable)
+            {
+                GatherBuddy.Log.Debug($"[AutoCollectable] Item [{itemValue.RowId}] {itemValue.Name} is not a collectable");
+                return false;
+            }
+
+            GatherBuddy.Log.Debug($"[AutoCollectable] Detected item [{itemValue.RowId}] {itemValue.Name}");
 
             if (!int.TryParse(Regex.Match(text, @"\d+").Value, out var value))
             {
@@ -71,46 +81,38 @@ namespace GatherBuddy.AutoGather
                 return false;
             }
 
-            if (GenericHelpers.FindRow<CollectablesShopItem>(x => x.Item.Value.RowId == item.RowId) is { } collectability)
+            GatherBuddy.Log.Debug($"[AutoCollectable] Detected collectability value: {value}");
+            GatherBuddy.Log.Debug($"[AutoCollectable] Item data - AetherialReduce: {itemValue.AetherialReduce}, AdditionalData.RowId: {itemValue.AdditionalData.RowId}");
             {
-                var min = collectability.CollectablesShopRefine.Value.LowCollectability;
-                GatherBuddy.Log.Debug($"[AutoCollectable] Minimum collectability required is {min}, value detected is {value}");
-                
-                if (value >= min)
+                if (itemValue.AetherialReduce > 0)
                 {
-                    GatherBuddy.Log.Debug($"[AutoCollectable] Accepting [{item.RowId}] {item.Name} with collectability of {value}");
-                    master.Yes();
+                    GatherBuddy.Log.Debug($"[AutoCollectable] Accepting [{itemValue.RowId}] {itemValue.Name} - aethersand fish");
+                    Callback.Fire(&addon->AtkUnitBase, true, 0);
                     return true;
+                }
+                else if (itemValue.AdditionalData.RowId != 0)
+                {
+                    var wksItem = Dalamud.GameData.GetExcelSheet<WKSItemInfo>().GetRow(itemValue.AdditionalData.RowId);
+                    if (wksItem.RowId != 0)
+                {
+                        GatherBuddy.Log.Debug($"[AutoCollectable] Accepting [{itemValue.RowId}] {itemValue.Name} - stellar fish for {wksItem.WKSItemSubCategory.ValueNullable?.Name ?? "null"}");
+                        Callback.Fire(&addon->AtkUnitBase, true, 0);
+                        return true;
+                    }
+                    else
+                    {
+                        GatherBuddy.Log.Debug($"[AutoCollectable] No CollectablesShopItem found for [{itemValue.RowId}] {itemValue.Name}");
+                    }
                 }
                 else
                 {
-                    GatherBuddy.Log.Debug($"[AutoCollectable] Declining [{item.RowId}] {item.Name} with insufficient collectability of {value}");
-                    master.No();
-                    return true;
-                }
-            }
-            else
-            {
-                if (item.AetherialReduce > 0)
-                {
-                    GatherBuddy.Log.Debug($"[AutoCollectable] Accepting [{item.RowId}] {item.Name} - aethersand fish");
-                    master.Yes();
-                    return true;
-                }
-                // API12 stub: WKSItemInfo.WKSItemSubCategory.ValueNullable wrapper is newer Lumina;
-                // also Cosmic Exploration "stellar fish" feature is game 7.5+. B1 stub - branch never matches on TC 7.1.
-                else if (false)
-                {
-                    master.Yes();
-                    return true;
-                }
-                else
-                {
-                    GatherBuddy.Log.Debug($"[AutoCollectable] No CollectablesShopItem found for [{item.RowId}] {item.Name}");
+                    GatherBuddy.Log.Debug($"[AutoCollectable] No CollectablesShopItem found for [{itemValue.RowId}] {itemValue.Name}");
                 }
             }
 
-            return false;
+            GatherBuddy.Log.Debug($"[AutoCollectable] Accepting [{itemValue.RowId}] {itemValue.Name} - generic collectable fish with value {value}");
+            Callback.Fire(&addon->AtkUnitBase, true, 0);
+            return true;
         }
     }
 }

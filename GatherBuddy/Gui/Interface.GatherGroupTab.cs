@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using GatherBuddy.Interfaces;
 using GatherBuddy.Time;
-using OtterGui;
+using ElliLib;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
@@ -16,8 +16,8 @@ using GatherBuddy.GatherGroup;
 using GatherBuddy.GatherHelper;
 using GatherBuddy.AutoGather.Lists;
 using GatherBuddy.Plugin;
-using OtterGui.Widgets;
-using ImRaii = OtterGui.Raii.ImRaii;
+using ElliLib.Widgets;
+using ImRaii = ElliLib.Raii.ImRaii;
 
 namespace GatherBuddy.Gui;
 
@@ -111,7 +111,7 @@ public partial class Interface
             .GameData
             .Gatherables.Values
             .Concat(GatherBuddy.GameData.Fishes.Values.Cast<IGatherable>())
-            .Where(g => g.Locations.Any())
+            .Where(g => g.Locations.Count != 0)
             .OrderBy(g => g.Name[GatherBuddy.Language])
             .ToArray();
 
@@ -324,7 +324,7 @@ public partial class Interface
             var gatherable = GatherGroupCache.AllGatherables[idx];
             if (gatherable.InternalLocationId > 0)
             {
-                var locations = gatherable.Locations.ToList();
+                var locations = gatherable.Locations;
                 if (locations.Count is 1 && locations[0] is GatheringNode node)
                 {
                     var changes = false;

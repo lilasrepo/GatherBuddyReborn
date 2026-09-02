@@ -4,6 +4,7 @@ using System.Linq;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Utility;
+using FFXIVClientStructs.FFXIV.Client.Game.Event;
 using GatherBuddy.Classes;
 using GatherBuddy.Config;
 using GatherBuddy.Enums;
@@ -11,9 +12,9 @@ using GatherBuddy.Interfaces;
 using GatherBuddy.Plugin;
 using GatherBuddy.SeFunctions;
 using GatherBuddy.Structs;
-using OtterGui;
-using OtterGui.Table;
-using ImRaii = OtterGui.Raii.ImRaii;
+using ElliLib;
+using ElliLib.Table;
+using ImRaii = ElliLib.Raii.ImRaii;
 
 namespace GatherBuddy.Gui;
 
@@ -495,7 +496,7 @@ public partial class Interface
             public override void DrawColumn(ExtendedFish item, int _)
             {
                 using (var color = ImRaii.PushColor(ImGuiCol.Text, ColorId.HighlightText.Value(),
-                           _plugin.FishRecorder.LastState != FishingState.None && item.Uptime.Item1.Id == _plugin.FishRecorder.Record.SpotId))
+                           _plugin.FishRecorder.LastState != FishingState.NotFishing && item.Uptime.Item1.Id == _plugin.FishRecorder.Record.SpotId))
                 {
                     if (ImGui.Selectable(ToName(item)))
                         _plugin.Executor.GatherLocation(item.Uptime.Item1);
@@ -607,8 +608,10 @@ public partial class Interface
         if (!tab)
             return;
 
-        _fishTable.ExtraHeight = GatherBuddy.Config.ShowStatusLine ? ImGui.GetTextLineHeight() : 0;
+        _fishTable.ExtraHeight = (GatherBuddy.Config.ShowStatusLine ? ImGui.GetTextLineHeight() : 0)
+          + ImGui.GetFrameHeightWithSpacing();
         _fishTable.Draw(ImGui.GetTextLineHeightWithSpacing());
+        DrawAddAllFilteredToAutoGather(_fishTable, f => f.Data, "Fish");
         DrawStatusLine(_fishTable, "Fish");
         DrawClippy();
     }

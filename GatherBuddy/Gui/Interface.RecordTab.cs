@@ -7,10 +7,10 @@ using GatherBuddy.Config;
 using GatherBuddy.Enums;
 using GatherBuddy.FishTimer;
 using GatherBuddy.Plugin;
-using OtterGui;
-using OtterGui.Table;
+using ElliLib;
+using ElliLib.Table;
 using Newtonsoft.Json;
-using ImRaii = OtterGui.Raii.ImRaii;
+using ImRaii = ElliLib.Raii.ImRaii;
 using System.Text;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Textures;
@@ -18,7 +18,7 @@ using Dalamud.Interface.Utility;
 using Effects = GatherBuddy.Models.Effects;
 using GatherBuddy.Time;
 using GatherBuddy.Weather;
-using OtterGui.Text;
+using ElliLib.Text;
 
 namespace GatherBuddy.Gui;
 
@@ -91,7 +91,7 @@ public partial class Interface
                 => 50 * ImGuiHelpers.GlobalScale;
 
             public override int Compare(FishRecord lhs, FishRecord rhs)
-                => lhs.Perception.CompareTo(rhs.Gathering);
+                => lhs.Perception.CompareTo(rhs.Perception);
 
             public override void DrawColumn(FishRecord record, int _)
                 => ImGuiUtil.RightAlign(ToName(record));
@@ -212,7 +212,13 @@ public partial class Interface
             public override void DrawColumn(FishRecord record, int _)
             {
                 base.DrawColumn(record, _);
-                ImGuiUtil.HoverTooltip(record.TimeStamp.ToString());
+                if (ImGui.IsItemHovered())
+                {
+                    using var tt = ImUtf8.Tooltip();
+                    ImUtf8.Text($"{record.TimeStamp}");
+                    var et = record.TimeStamp.ConvertToEorzea().RoundToSecond();
+                    ImUtf8.Text($"{et.CurrentHour:D2}:{et.CurrentMinute:D2}:{et.CurrentSecond:D2} ET");
+                }
             }
         }
 
@@ -346,9 +352,7 @@ public partial class Interface
                 => lhs.Bite.CompareTo(rhs.Bite);
         }
 
-        // API12 stub: walk-back OtterGui has ColumnFlags<T,U> only; TriStateColumnFlags was added later.
-        // Tri-state On/Off filter degrades to standard flag-set filter (still functional).
-        private class FlagHeader : ColumnFlags<FlagHeader.ColumnEffects, FishRecord>
+        private class FlagHeader : TriStateColumnFlags<FlagHeader.ColumnEffects, FishRecord>
         {
             private          float                                           _iconScale;
             private readonly (ISharedImmediateTexture, Effects)[] _effects;
@@ -424,8 +428,8 @@ public partial class Interface
                 "Modest Lure",
             ];
 
-            // API12 stub: walk-back OtterGui's ColumnFlags<,> has Values returning IReadOnlyList<T>
-            // (not tri-state tuples). Default base impl uses Enum.GetValues<T>() — adequate.
+            protected override IReadOnlyList<(ColumnEffects On, ColumnEffects Off)> Values
+                => _values;
 
             protected override string[] Names
                 => _names;
@@ -436,6 +440,16 @@ public partial class Interface
                     _filter |= value;
                 else
                     _filter &= ~value;
+            }
+
+            protected override void SetValue((ColumnEffects On, ColumnEffects Off) value, bool? enable)
+            {
+                switch (enable)
+                {
+                    case null:  _filter |= value.On | value.Off; break;
+                    case true:  _filter =  (_filter | value.On) & ~value.Off; break;
+                    case false: _filter =  (_filter | value.Off) & ~value.On; break;
+                }
             }
 
             private ColumnEffects _filter;

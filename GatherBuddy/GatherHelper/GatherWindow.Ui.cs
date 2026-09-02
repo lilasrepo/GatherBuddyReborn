@@ -15,9 +15,9 @@ using GatherBuddy.Enums;
 using GatherBuddy.Gui;
 using GatherBuddy.Interfaces;
 using GatherBuddy.Time;
-using OtterGui;
+using ElliLib;
 using Functions = GatherBuddy.Plugin.Functions;
-using ImRaii = OtterGui.Raii.ImRaii;
+using ImRaii = ElliLib.Raii.ImRaii;
 
 namespace GatherBuddy.GatherHelper;
 
@@ -41,10 +41,11 @@ public class GatherWindow : Window
           | ImGuiWindowFlags.NoNavFocus
           | ImGuiWindowFlags.NoScrollbar)
     {
-        _plugin            = plugin;
-        IsOpen             = GatherBuddy.Config.ShowGatherWindow;
-        RespectCloseHotkey = false;
-        Namespace          = "GatherHelperReborn";
+        _plugin             = plugin;
+        IsOpen              = GatherBuddy.Config.ShowGatherWindow;
+        RespectCloseHotkey  = false;
+        Namespace           = "GatherHelperReborn";
+        DisableWindowSounds = true;
         SizeConstraints = new WindowSizeConstraints
         {
             MinimumSize = Vector2.Zero,
@@ -162,7 +163,7 @@ public class GatherWindow : Window
         if (GatherBuddy.Config.ShowGatherWindowOnlyAvailable && time.Start > GatherBuddy.Time.ServerTime)
             return;
 
-        var inventoryCount = item.GetInventoryCount();
+        var inventoryCount = item.GetTotalCount();
 
         if (quantity > 0 && inventoryCount >= quantity && GatherBuddy.Config.HideGatherWindowCompletedItems)
             return;
@@ -299,8 +300,7 @@ public class GatherWindow : Window
         _data.Clear();
 
         var list = _plugin.AutoGatherListsManager.ActiveItems
-            .Select(x => (Item: x.Item as IGatherable, x.Quantity))
-            .Union(_plugin.AutoGatherListsManager.ActiveFish.Select(x => (Item: x.Fish as IGatherable, x.Quantity)))
+            .Select(x => (x.Item, x.Quantity))
             .Concat(_plugin.GatherWindowManager.ActiveItems.Select(i => (Item: i, Quantity: 0u)))
             .GroupBy(x => x.Item)
             .Select(g => { var (loc, time) = GatherBuddy.UptimeManager.BestLocation(g.Key); return (g.Key, loc, time, (uint)g.Sum(x => x.Quantity)); });

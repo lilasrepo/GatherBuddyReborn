@@ -7,10 +7,10 @@ using Dalamud.Interface.Utility;
 using GatherBuddy.Config;
 using GatherBuddy.Interfaces;
 using GatherBuddy.Time;
-using OtterGui;
-using OtterGui.Table;
-using OtterGui.Text;
-using ImRaii = OtterGui.Raii.ImRaii;
+using ElliLib;
+using ElliLib.Table;
+using ElliLib.Text;
+using ImRaii = ElliLib.Raii.ImRaii;
 
 namespace GatherBuddy.Gui;
 
@@ -21,11 +21,11 @@ public partial class Interface
         const string noPreferred = "No Preferred Location";
         var          width       = SetInputWidth * 0.85f;
         ret = current;
-        if (item.Locations.Count() == 1)
+        if (item.Locations.Count == 1)
         {
             using var style = ImRaii.PushStyle(ImGuiStyleVar.ButtonTextAlign, new Vector2(0, 0.5f));
-            ImUtf8.TextFramed(item.Locations.First().Name, ImGui.GetColorU32(ImGuiCol.FrameBg), new Vector2(width, 0));
-            DrawLocationTooltip(item.Locations.First());
+            ImUtf8.TextFramed(item.Locations[0].Name, ImGui.GetColorU32(ImGuiCol.FrameBg), new Vector2(width, 0));
+            DrawLocationTooltip(item.Locations[0]);
             return false;
         }
 

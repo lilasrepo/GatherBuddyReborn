@@ -68,7 +68,6 @@ public partial class FishingParser
             Mooch          = new Regex(@"は釣り上げた.+を慎重に投げ込み、泳がせ釣りを試みた。",            RegexOptions.Compiled | RegexOptions.NonBacktracking | RegexOptions.ExplicitCapture),
             Undiscovered   = "未知の釣り場",
         });
-
         private static readonly Lazy<Regexes> ChineseSimplified = new(() => new Regexes
         {
             Cast = new Regex(@"在(?<FishingSpot>.+)甩出了鱼线开始钓鱼。", RegexOptions.Compiled),
@@ -79,3 +78,4 @@ public partial class FishingParser
         // @formatter:on
     }
 }
+
