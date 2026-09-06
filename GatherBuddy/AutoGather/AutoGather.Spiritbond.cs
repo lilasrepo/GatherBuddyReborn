@@ -53,6 +53,15 @@ public partial class AutoGather
         }
 
         EnqueueActionWithDelay(() => { if (MaterializeAddon is var addon and not null) Callback.Fire(&addon->AtkUnitBase, true, 2, 0); });
+        // TC(api13 / game 7.20): the game still shows the MaterializeDialog confirm popup, and
+        // YesAlready is locked for the whole AutoGather session (AutoGather.cs Enabled setter), so
+        // nothing else dismisses it. Upstream d600f75c dropped this wait+click; without it the
+        // sequence stalls on the item-selection window. Mirrors the plugin's own Crafting path
+        // (Crafting/CraftingTasks.cs). The Occupied39 disjunct keeps this correct on a client that
+        // does not show the popup: it falls through and the null-guarded click is a no-op.
+        TaskManager.Enqueue(() => MaterializeDialogAddon != null || Dalamud.Conditions[ConditionFlag.Occupied39],
+            1000, "MaterializeDialogAddon != null");
+        EnqueueActionWithDelay(() => { if (MaterializeDialogAddon is var dialog and not null) new MaterializeDialog(dialog).Materialize(); });
         TaskManager.Enqueue(() => !Dalamud.Conditions[ConditionFlag.Occupied39], "!Dalamud.Conditions[ConditionFlag.Occupied39]");
         EnqueueActionWithDelay(() => { });
 
