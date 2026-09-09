@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -166,7 +166,7 @@ public partial class FishRecorder
             DefaultRequestHeaders.Add("X-Client-Version", version);
 
             DefaultRequestHeaders.UserAgent.Clear();
-            DefaultRequestHeaders.UserAgent.ParseAdd($"GatherBuddyReborn/{version} (https://github.com/FFXIV-CombatReborn/GatherBuddyReborn)");
+            DefaultRequestHeaders.UserAgent.ParseAdd($"GatherBuddyReborn/{version} (https://github.com/lilasrepo/GatherBuddyReborn)");
         }
     }
 

@@ -20,7 +20,13 @@ x86/
 bld/
 [Bb]in/
 [Oo]bj/
-[Ll]og/
+# porting-note(TC): upstream's `[Ll]og/` rule is dropped. ElliLib/Log/Logger.cs is REQUIRED
+# source (ElliLib.Log.Logger is a ctor parameter of ServiceManager / MessageService /
+# SaveService / the combo widgets), and this file is honoured twice over: by the outer repo,
+# and by /plugin_update's temp 3-way-merge repo, which stages every side with `git add -A`.
+# With the rule present the file is invisible to both, so a refresh silently drops it and the
+# tree fails with 26x CS0246 'Logger' inside the pinned ElliLib dir -- which reads like a pin
+# failure and is not one. The rule buys nothing here: this is vendored source, not a build dir.
 [Ll]ogs/
 
 # Visual Studio cache/options directory
